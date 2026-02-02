@@ -24,11 +24,17 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          huggingface-cli login --token $HF_TOKEN
+          # Use token for git operations
+          git config --global credential.helper store
+          echo "https://user:${{ secrets.HF_TOKEN }}@huggingface.co" > ~/.git-credentials
+          
+          # Clone Space
           git clone https://huggingface.co/spaces/AhmedaAyman/Enterprise-Ai-Document-Intelligence-And-Reasoning-Platform hf_space
+          
           cd hf_space
           rm -rf *
           cp -r ../backend/* .
+          
           git config user.email "ci@github.com"
           git config user.name "GitHub Actions"
           git add .
