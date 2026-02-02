@@ -1,16 +1,14 @@
 FROM python:3.9-slim
 
-# Install system dependencies as root
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-eng \
     libtesseract-dev \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app directory and user
 RUN mkdir -p /app && \
     useradd -m -u 1000 user && \
     chown -R user:user /app
