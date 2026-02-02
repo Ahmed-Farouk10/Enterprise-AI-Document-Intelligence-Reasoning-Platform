@@ -1,0 +1,36 @@
+name: Deploy to HF Space
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install HF CLI
+        run: pip install huggingface-hub
+      
+      - name: Deploy to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          huggingface-cli login --token $HF_TOKEN
+          git clone https://huggingface.co/spaces/AhmedaAyman/Enterprise-Ai-Document-Intelligence-And-Reasoning-Platform hf_space
+          cd hf_space
+          rm -rf *
+          cp -r ../backend/* .
+          git config user.email "ci@github.com"
+          git config user.name "GitHub Actions"
+          git add .
+          git commit -m "Deploy: $(date +%Y-%m-%d-%H:%M)" || echo "No changes"
+          git push

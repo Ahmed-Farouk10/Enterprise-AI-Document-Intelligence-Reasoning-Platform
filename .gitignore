@@ -1,0 +1,31 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Data (large files)
+data/
+*.pdf
+*.docx
+*.xlsx
+*.jpg
+*.png
+
+# Models (large files)
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
