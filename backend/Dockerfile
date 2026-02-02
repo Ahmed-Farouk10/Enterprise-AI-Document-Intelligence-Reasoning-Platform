@@ -1,6 +1,6 @@
 FROM python:3.9-slim
 
-# Install Tesseract + system deps
+# Install system dependencies as root
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-eng \
@@ -10,17 +10,22 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd -m -u 1000 user
-USER user
-ENV PATH="/home/user/.local/bin:$PATH"
+# Create app directory and user
+RUN mkdir -p /app && \
+    useradd -m -u 1000 user && \
+    chown -R user:user /app
 
 WORKDIR /app
 
-COPY --chown=user requirements.txt requirements.txt
-RUN pip install --no-cache-dir --upgrade -r requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade -r requirements.txt && \
+    chown -R user:user /app
 
-COPY --chown=user . /app
+USER user
+ENV PATH="/home/user/.local/bin:$PATH"
+
+COPY --chown=user . .
 
 EXPOSE 7860
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
