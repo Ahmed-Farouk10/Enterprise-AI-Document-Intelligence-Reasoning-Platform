@@ -1,9 +1,11 @@
+# Edit backend/app/main.py - change version number
+# Or just touch it to modify timestamp
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="Enterprise Document Intelligence API",
-    version="0.1.0",
+    version="0.1.1",
     description="Multimodal AI using 4 datasets: RVL-CDIP, FUNSD, SROIE, GAN"
 )
 
