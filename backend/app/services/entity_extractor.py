@@ -1,28 +1,29 @@
-"""
+﻿"""
 D3: SROIE Entity Extraction
 Deterministic regex/heuristic-based extraction for receipts
 """
 
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import logging
 
 logger = logging.getLogger(__name__)
 
+
 class EntityExtractor:
     """
     Extracts entities from receipt text using regex patterns.
-    No ML model — 100% deterministic and interpretable.
+    No ML model - 100% deterministic and interpretable.
     """
     
     # Currency patterns: $1,234.56 or 1,234.56 or 1234.56
-# Line 14: Replace with ASCII-only version
-     MONEY_PATTERN = r'\$\s*\d[\d,]*\.?\d{0,2}|\b\d[\d,]*\.\d{2}\b'    
+    MONEY_PATTERN = r'\$\s*\d[\d,]*\.?\d{0,2}|\b\d[\d,]*\.\d{2}\b'
+    
     # Date patterns: various formats
     DATE_PATTERNS = [
-        r'\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b',  # MM/DD/YYYY, DD-MM-YY
-        r'\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b',    # YYYY-MM-DD
-        r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}\b',  # Jan 15, 2024
+        r'\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b',
+        r'\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b',
+        r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}\b',
     ]
     
     # Keywords indicating totals
@@ -40,9 +41,6 @@ class EntityExtractor:
     def extract(self, text: str) -> Dict:
         """
         Extract all entities from receipt text.
-        
-        Returns:
-            Dictionary with extracted entities and confidence scores
         """
         text_lower = text.lower()
         lines = [line.strip() for line in text.split('\n') if line.strip()]
@@ -55,7 +53,6 @@ class EntityExtractor:
             'items': self._extract_items(lines),
         }
         
-        # Calculate overall confidence
         confidence = self._calculate_confidence(entities)
         
         return {
@@ -73,10 +70,8 @@ class EntityExtractor:
         if not all_money:
             return {'value': None, 'confidence': 0.0, 'method': 'none_found'}
         
-        # Clean money strings
         cleaned = []
         for m in all_money:
-            # Remove currency symbols and commas
             val = re.sub(r'[^\d.]', '', m.replace(',', ''))
             try:
                 cleaned.append((m, float(val)))
@@ -86,11 +81,10 @@ class EntityExtractor:
         if not cleaned:
             return {'value': None, 'confidence': 0.0, 'method': 'parse_error'}
         
-        # Strategy 1: Find line with total keyword
+        # Find line with total keyword
         for i, line in enumerate(lines):
             line_lower = line.lower()
             if any(kw in line_lower for kw in self.TOTAL_KEYWORDS):
-                # Look for money in this line or next few lines
                 for j in range(i, min(i+3, len(lines))):
                     for orig, val in cleaned:
                         if orig in lines[j] and val > 0:
@@ -102,7 +96,7 @@ class EntityExtractor:
                                 'keyword_found': True
                             }
         
-        # Strategy 2: Largest amount (usually total)
+        # Largest amount heuristic
         largest = max(cleaned, key=lambda x: x[1])
         return {
             'value': largest[0],
@@ -117,7 +111,6 @@ class EntityExtractor:
         for i, line in enumerate(lines):
             line_lower = line.lower()
             if any(kw in line_lower for kw in self.TAX_KEYWORDS):
-                # Look for money in this line
                 money = re.findall(self.MONEY_PATTERN, line)
                 if money:
                     val = re.sub(r'[^\d.]', '', money[-1].replace(',', ''))
@@ -148,12 +141,9 @@ class EntityExtractor:
     
     def _extract_company(self, lines: List[str]) -> Dict:
         """Extract company name from header or lines with company indicators."""
-        
-        # Strategy 1: Line with company indicator (Inc, LLC, etc.)
-        for line in lines[:10]:  # Check first 10 lines
+        for line in lines[:10]:
             line_lower = line.lower()
             if any(ind in line_lower for ind in self.COMPANY_INDICATORS):
-                # Clean up the line
                 clean = line.strip()
                 if len(clean) > 2 and len(clean) < 100:
                     return {
@@ -162,7 +152,6 @@ class EntityExtractor:
                         'method': 'company_indicator'
                     }
         
-        # Strategy 2: First non-empty line (often store name)
         if lines:
             first = lines[0].strip()
             if len(first) > 2 and len(first) < 50 and not any(c.isdigit() for c in first[:5]):
@@ -179,26 +168,23 @@ class EntityExtractor:
         items = []
         
         for line in lines:
-            # Look for pattern: text ... $XX.XX
-            match = re.match(r'(.+?)\s+[\$€£]?\s*(\d[\d,]*\.?\d{0,2})\s*$', line)
+            match = re.match(r'(.+?)\s+[\$]?\s*(\d[\d,]*\.?\d{0,2})\s*$', line)
             if match:
                 desc, price = match.groups()
                 desc = desc.strip()
                 price_clean = price.replace(',', '')
                 
-                # Skip if looks like total/tax line
                 desc_lower = desc.lower()
                 if any(kw in desc_lower for kw in self.TOTAL_KEYWORDS + self.TAX_KEYWORDS):
                     continue
                 
-                if len(desc) > 2:  # Valid item
+                if len(desc) > 2:
                     items.append({
                         'description': desc,
                         'price': f"${price}",
                         'numeric_price': float(price_clean)
                     })
             
-            # Limit items
             if len(items) >= 10:
                 break
         
@@ -212,7 +198,6 @@ class EntityExtractor:
             if key in entities and isinstance(entities[key], dict):
                 confidences.append(entities[key].get('confidence', 0))
         
-        # Weight total_amount higher
         if 'total_amount' in entities and isinstance(entities['total_amount'], dict):
             confidences.append(entities['total_amount'].get('confidence', 0) * 1.5)
         
