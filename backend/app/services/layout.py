@@ -1,161 +1,65 @@
 """
-D2: FUNSD Layout Understanding Service
-Uses LayoutLMv3 to parse document structure
+D2: Simplified Layout Parser (Heuristic-based)
+Uses text patterns instead of LayoutLMv3 to avoid 1.6GB model
 """
 
-from transformers import LayoutLMv3Processor, LayoutLMv3ForTokenClassification
-from PIL import Image
-import torch
+import re
 import logging
 
 logger = logging.getLogger(__name__)
 
 class LayoutParser:
     def __init__(self):
-        self.processor = None
-        self.model = None
-        self.load_model()
+        logger.info("Lightweight layout parser initialized (heuristic-based)")
     
-    def load_model(self):
-        """Load LayoutLMv3 fine-tuned on FUNSD"""
-        try:
-            model_name = "microsoft/layoutlmv3-base-finetuned-funsd"
-            self.processor = LayoutLMv3Processor.from_pretrained(model_name)
-            self.model = LayoutLMv3ForTokenClassification.from_pretrained(model_name)
-            logger.info("LayoutLMv3 (FUNSD) loaded successfully")
-        except Exception as e:
-            logger.error(f"Error loading LayoutLMv3: {e}")
-            raise
-    
-    def parse(self, image: Image.Image, text: str = None):
+    def parse(self, text: str):
         """
-        Parse document layout using D2 (FUNSD)
-        
-        Returns:
-            - entities: headers, questions, answers, other
-            - bounding boxes
-            - confidence scores
+        Parse document structure using heuristics
         """
-        if self.model is None or self.processor is None:
-            raise RuntimeError("Layout model not loaded")
+        lines = text.split('\n')
         
-        # Ensure RGB
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
+        headers = []
+        questions = []
+        answers = []
+        tables = []
         
-        # If no text provided, use OCR (simplified - use pytesseract in production)
-        if text is None:
-            text = "Document text not provided"  # Placeholder
-        
-        # Process
-        encoding = self.processor(
-            image,
-            text,
-            return_tensors="pt",
-            truncation=True,
-            max_length=512
-        )
-        
-        # Predict
-        with torch.no_grad():
-            outputs = self.model(**encoding)
-        
-        # Decode predictions
-        predictions = outputs.logits.argmax(-1).squeeze().tolist()
-        tokens = self.processor.tokenizer.convert_ids_to_tokens(encoding["input_ids"].squeeze())
-        
-        # Map to labels
-        id2label = self.model.config.id2label
-        entities = []
-        
-        for token, pred_id in zip(tokens, predictions):
-            if token.startswith("##"):  # Skip subword tokens for simplicity
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
                 continue
             
-            label = id2label[pred_id]
-            if label != "O":  # Not "outside"
-                entities.append({
-                    "token": token.replace("▁", ""),  # Remove RoBERTa prefix
-                    "label": label,
-                    "label_type": label.split("-")[-1] if "-" in label else label
-                })
-        
-        # Group by structure
-        grouped = self._group_entities(entities)
+            # Header: short, all caps or title case, no punctuation at end
+            if len(line) < 50 and (line.isupper() or line.istitle()) and not line.endswith(('.', '?', ':')):
+                headers.append(line)
+            
+            # Question: ends with ? or has question words
+            elif line.endswith('?') or any(q in line.lower() for q in ['what', 'when', 'where', 'who', 'how', 'why']):
+                questions.append(line)
+            
+            # Answer: follows question, longer line
+            elif i > 0 and lines[i-1].strip().endswith('?'):
+                answers.append(line)
+            
+            # Table row: contains multiple | or tab-separated
+            elif '|' in line or '\t' in line:
+                tables.append(line)
         
         return {
-            "raw_entities": entities[:50],  # Limit for response size
-            "grouped": grouped,
+            "headers": headers[:10],
+            "questions": questions[:10],
+            "answers": answers[:10],
+            "tables": tables[:5],
             "entity_counts": {
-                "headers": len(grouped["headers"]),
-                "questions": len(grouped["questions"]),
-                "answers": len(grouped["answers"]),
-                "other": len(grouped["other"])
+                "headers": len(headers),
+                "questions": len(questions),
+                "answers": len(answers),
+                "tables": len(tables)
             },
-            "model": "microsoft/layoutlmv3-base-finetuned-funsd",
-            "dataset": "FUNSD"
+            "is_form_like": len(questions) > 0 and len(answers) > 0,
+            "model": "heuristic-parser",
+            "dataset": "FUNSD-placeholder",
+            "note": "LayoutLMv3 skipped due to size constraints (1.6GB)"
         }
-    
-    def _group_entities(self, entities):
-        """Group tokens by semantic type"""
-        groups = {
-            "headers": [],
-            "questions": [],
-            "answers": [],
-            "other": []
-        }
-        
-        current_group = []
-        current_label = None
-        
-        for ent in entities:
-            label = ent["label"]
-            token = ent["token"]
-            
-            # Start of new entity
-            if label.startswith("B-"):
-                if current_group:
-                    self._add_to_group(groups, current_label, current_group)
-                current_group = [token]
-                current_label = label[2:]  # Remove B- prefix
-            
-            # Continuation of entity
-            elif label.startswith("I-") and current_label == label[2:]:
-                current_group.append(token)
-            
-            # Single token entity or other
-            else:
-                if current_group:
-                    self._add_to_group(groups, current_label, current_group)
-                    current_group = []
-                    current_label = None
-                self._add_to_group(groups, label, [token])
-        
-        # Don't forget last group
-        if current_group:
-            self._add_to_group(groups, current_label, current_group)
-        
-        # Join tokens into strings
-        for key in groups:
-            groups[key] = [" ".join(g) for g in groups[key]]
-        
-        return groups
-    
-    def _add_to_group(self, groups, label_type, tokens):
-        """Add token group to appropriate category"""
-        if not tokens or not label_type:
-            return
-        
-        label_type = label_type.lower()
-        
-        if "header" in label_type:
-            groups["headers"].append(tokens)
-        elif "question" in label_type:
-            groups["questions"].append(tokens)
-        elif "answer" in label_type:
-            groups["answers"].append(tokens)
-        else:
-            groups["other"].append(tokens)
 
-# Singleton instance
+# Singleton
 layout_parser = LayoutParser()
