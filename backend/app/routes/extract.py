@@ -1,19 +1,21 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.services.layout import layout_parser
+from app.services.receipt_parser import receipt_parser
+from app.services.resume_parser import resume_parser
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class TextRequest(BaseModel):
+class ExtractRequest(BaseModel):
     text: str
+    doc_type: str = "unknown"
 
 
 @router.post("/layout")
-async def extract_layout(request: TextRequest):
+async def extract_layout(request: ExtractRequest):
     """D2: Extract layout structure (heuristic-based)."""
     try:
         result = layout_parser.parse(request.text)
@@ -33,46 +35,35 @@ async def extract_layout(request: TextRequest):
 
 
 @router.post("/")
-async def extract_entities(request: TextRequest):
+async def extract_entities(request: ExtractRequest):
     """
-    D3: Simple entity extraction using regex (no external dependencies).
+    D3: Smart Router - Detects Receipt vs Resume and uses specialized parsers
     """
-    text = request.text
-    
-    # Simple regex extraction
-    money_pattern = r'\$\s*\d[\d,]*\.?\d{0,2}'
-    date_pattern = r'\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b'
-    
-    money_matches = re.findall(money_pattern, text)
-    date_matches = re.findall(date_pattern, text)
-    
-    # Find largest amount as potential total
-    total = None
-    if money_matches:
-        # Clean and find max
-        amounts = []
-        for m in money_matches:
-            clean = re.sub(r'[^\d.]', '', m)
-            try:
-                amounts.append((m, float(clean)))
-            except:
-                pass
-        if amounts:
-            total = max(amounts, key=lambda x: x[1])
-    
-    return {
-        "status": "success",
-        "extraction": {
-            "total_amount": {
-                "value": total[0] if total else None,
-                "numeric": total[1] if total else None
-            },
-            "dates": date_matches,
-            "all_money_found": money_matches
-        },
-        "model": "simple-regex",
-        "dataset": "SROIE-placeholder"
-    }
+    try:
+        text_lower = request.text.lower()
+        
+        # 1. Detect Type
+        is_resume = (request.doc_type == "resume") or \
+                   ("education" in text_lower and "experience" in text_lower)
+        
+        # 2. Extract using specialized parser
+        if is_resume:
+            data = resume_parser.extract(request.text)
+            model = "resume-heuristic-v1"
+        else:
+            data = receipt_parser.extract(request.text)
+            model = "receipt-heuristic-v1"
+            
+        return {
+            "status": "success",
+            "entities": data,
+            "model": model,
+            "doc_type_detected": "resume" if is_resume else "receipt"
+        }
+
+    except Exception as e:
+        logger.error(f"Extraction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/health")
@@ -80,5 +71,5 @@ async def health_check():
     return {
         "status": "healthy",
         "d2_model": "heuristic-layout-parser",
-        "d3_model": "simple-regex-extractor"
+        "d3_model": "receipt-heuristic-v1 + resume-heuristic-v1"
     }
