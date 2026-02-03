@@ -16,8 +16,8 @@ class EntityExtractor:
     """
     
     # Currency patterns: $1,234.56 or 1,234.56 or 1234.56
-    MONEY_PATTERN = r'[\$€£]\s*\d[\d,]*\.?\d{0,2}|\b\d[\d,]*\.\d{2}\b'
-    
+# Line 14: Replace with ASCII-only version
+     MONEY_PATTERN = r'\$\s*\d[\d,]*\.?\d{0,2}|\b\d[\d,]*\.\d{2}\b'    
     # Date patterns: various formats
     DATE_PATTERNS = [
         r'\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b',  # MM/DD/YYYY, DD-MM-YY
