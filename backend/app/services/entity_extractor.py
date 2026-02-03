@@ -16,7 +16,7 @@ class EntityExtractor:
     """
     
     # Currency patterns: $1,234.56 or 1,234.56 or 1234.56
-    MONEY_PATTERN = r'(?:[\$€£])\s*[\d,]+\.?\d{0,2}|\b[\d,]+\.\d{2}\b'
+    MONEY_PATTERN = r'[\$€£]\s*\d[\d,]*\.?\d{0,2}|\b\d[\d,]*\.\d{2}\b'
     
     # Date patterns: various formats
     DATE_PATTERNS = [
@@ -180,7 +180,7 @@ class EntityExtractor:
         
         for line in lines:
             # Look for pattern: text ... $XX.XX
-            match = re.match(r'(.+?)\s+[\$€£]?\s*([\d,]+\.\d{2})\s*$', line)
+            match = re.match(r'(.+?)\s+[\$€£]?\s*(\d[\d,]*\.?\d{0,2})\s*$', line)
             if match:
                 desc, price = match.groups()
                 desc = desc.strip()
