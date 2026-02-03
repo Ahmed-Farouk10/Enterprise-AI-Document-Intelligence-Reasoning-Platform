@@ -1,19 +1,19 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.services.layout import layout_parser
+from app.services.entity_extractor import entity_extractor
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-class ExtractRequest(BaseModel):
+class TextRequest(BaseModel):
     text: str
 
 @router.post("/layout")
-async def extract_layout(request: ExtractRequest):
+async def extract_layout(request: TextRequest):
     """
     D2: Extract layout structure (heuristic-based).
-    Identifies headers, questions, answers in forms.
     """
     try:
         result = layout_parser.parse(request.text)
@@ -34,22 +34,34 @@ async def extract_layout(request: ExtractRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/")
-async def extract_entities(request: ExtractRequest):
+async def extract_entities(request: TextRequest):
     """
-    D3: Entity extraction placeholder (SROIE - Phase 4)
+    D3: Entity extraction from receipts (SROIE pattern-based).
+    Extracts: total_amount, tax_amount, date, company_name, items
     """
-    return {
-        "status": "placeholder",
-        "message": "D3 entity extraction (SROIE) coming in Phase 4",
-        "text_length": len(request.text),
-        "dataset": "SROIE-pending"
-    }
+    try:
+        result = entity_extractor.extract(request.text)
+        
+        return {
+            "status": "success",
+            "extraction": result,
+            "summary": {
+                "total_found": result['entities']['total_amount']['value'] is not None,
+                "date_found": result['entities']['date']['value'] is not None,
+                "company_found": result['entities']['company_name']['value'] is not None,
+                "items_found": len(result['entities']['items'])
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Entity extraction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/health")
 async def health_check():
     return {
         "status": "healthy",
         "d2_model": "heuristic-layout-parser",
-        "d3_model": "SROIE-pending",
-        "note": "LayoutLMv3 skipped (1.6GB too large for free tier)"
+        "d3_model": "deterministic-regex-extractor",
+        "capabilities": ["total_amount", "tax_amount", "date", "company_name", "line_items"]
     }
