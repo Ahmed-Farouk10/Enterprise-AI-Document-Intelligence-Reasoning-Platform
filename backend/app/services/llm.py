@@ -29,6 +29,22 @@ class LLMService:
         )
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
+    def rewrite_query(self, question: str) -> str:
+        """
+        Query rewriting: Expand complex questions into clearer search queries
+        """
+        prompt = f"""Task: Rewrite this question to be clearer and more specific for document search.
+Question: {question}
+Rewritten:"""
+        
+        rewritten = self._run_inference(prompt, max_length=64)
+        
+        # Only use rewrite if it's substantially different and not malformed
+        if len(rewritten) > 5 and rewritten.lower() != question.lower():
+            logger.info(f"Query rewritten: '{question}' -> '{rewritten}'")
+            return rewritten
+        return question
+
     def grade_relevance(self, context: str, question: str) -> bool:
         """
         Self-RAG Step 1: Retrieval Grading
