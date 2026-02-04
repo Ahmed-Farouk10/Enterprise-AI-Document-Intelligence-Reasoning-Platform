@@ -1,21 +1,26 @@
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 import faiss
 import numpy as np
 import logging
 from typing import List, Dict, Tuple
 import uuid
+from rank_bm25 import BM25Okapi
 
 logger = logging.getLogger(__name__)
 
 class VectorStore:
     def __init__(self):
-        logger.info("Initializing Enhanced Vector Store (Multi-Doc + Citations)...")
+        logger.info("Initializing Advanced Vector Store (Hybrid Search + Re-Ranking)...")
         self.model = SentenceTransformer('all-MiniLM-L6-v2')  # 80MB, fast
+        self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')  # 80MB
         self.dimension = 384
         self.index = None
         self.chunks = []
-        self.metadata = []  # Store doc_id, chunk_index, original_text
-        self.documents = {}  # doc_id -> document info
+        self.metadata = []
+        self.documents = {}
+        self.bm25 = None  # BM25 index
+        self.tokenized_chunks = []  # For BM25
+        logger.info("Models loaded: Bi-encoder + BM25 + Cross-encoder")
         
     def clear(self):
         """Reset the vector store"""
@@ -23,6 +28,8 @@ class VectorStore:
         self.chunks = []
         self.metadata = []
         self.documents = {}
+        self.bm25 = None
+        self.tokenized_chunks = []
         
     def add_document(self, text: str, doc_id: str = None, doc_name: str = None, chunk_size: int = 300):
         """
@@ -85,39 +92,148 @@ class VectorStore:
         self.chunks.extend(chunks)
         self.metadata.extend(chunk_metadata)
         
-        # Encode all chunks (rebuild index)
+        # Encode all chunks (rebuild FAISS index)
         embeddings = self.model.encode(self.chunks, convert_to_numpy=True)
-        
-        # Rebuild FAISS index
         self.index = faiss.IndexFlatL2(self.dimension)
         self.index.add(embeddings.astype('float32'))
         
+        # Build BM25 index
+        self.tokenized_chunks = [chunk.lower().split() for chunk in self.chunks]
+        self.bm25 = BM25Okapi(self.tokenized_chunks)
+        
         logger.info(f"Added {len(chunks)} chunks from '{doc_name}' (ID: {doc_id}). Total chunks: {len(self.chunks)}")
         return doc_id
+    
+    def _bm25_search(self, query: str, k: int = 20) -> List[Tuple[int, float]]:
+        """BM25 keyword search"""
+        if self.bm25 is None:
+            return []
         
-    def retrieve_with_citations(self, query: str, k: int = 3) -> List[Dict]:
-        """
-        Retrieve top-k chunks WITH citation metadata
-        Returns: [{"text": "...", "doc_id": "...", "doc_name": "...", "score": 0.95}, ...]
-        """
+        tokenized_query = query.lower().split()
+        scores = self.bm25.get_scores(tokenized_query)
+        
+        # Get top-k indices
+        top_indices = np.argsort(scores)[::-1][:k]
+        return [(int(idx), float(scores[idx])) for idx in top_indices if scores[idx] > 0]
+    
+    def _semantic_search(self, query: str, k: int = 20) -> List[Tuple[int, float]]:
+        """Dense semantic search"""
         if self.index is None or len(self.chunks) == 0:
             return []
-            
-        query_embedding = self.model.encode([query], convert_to_numpy=True)
         
+        query_embedding = self.model.encode([query], convert_to_numpy=True)
         k = min(k, len(self.chunks))
         distances, indices = self.index.search(query_embedding.astype('float32'), k)
         
-        # Build results with citations
+        # Convert distance to similarity score
+        return [(int(indices[0][i]), float(1 / (1 + distances[0][i]))) for i in range(len(indices[0]))]
+    
+    def hybrid_search(self, query: str, k: int = 20, alpha: float = 0.5) -> List[Dict]:
+        """
+        Hybrid search: BM25 + Semantic
+        alpha=0.5 means equal weight, alpha=1.0 means full semantic, alpha=0.0 means full BM25
+        """
+        # Get candidates from both methods
+        bm25_results = self._bm25_search(query, k=k)
+        semantic_results = self._semantic_search(query, k=k)
+        
+        # Normalize scores to [0, 1]
+        def normalize(results):
+            if not results:
+                return {}
+            scores = [score for _, score in results]
+            max_score = max(scores) if scores else 1.0
+            min_score = min(scores) if scores else 0.0
+            range_score = max_score - min_score if max_score > min_score else 1.0
+            return {idx: (score - min_score) / range_score for idx, score in results}
+        
+        bm25_norm = normalize(bm25_results)
+        semantic_norm = normalize(semantic_results)
+        
+        # Combine scores
+        all_indices = set(bm25_norm.keys()) | set(semantic_norm.keys())
+        combined = {}
+        for idx in all_indices:
+            bm25_score = bm25_norm.get(idx, 0.0)
+            semantic_score = semantic_norm.get(idx, 0.0)
+            combined[idx] = alpha * semantic_score + (1 - alpha) * bm25_score
+        
+        # Sort by combined score
+        sorted_indices = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:k]
+        
+        # Build results
         results = []
-        for dist, idx in zip(distances[0], indices[0]):
+        for idx, score in sorted_indices:
             results.append({
                 "text": self.chunks[idx],
                 "doc_id": self.metadata[idx]["doc_id"],
                 "doc_name": self.metadata[idx]["doc_name"],
                 "chunk_index": self.metadata[idx]["chunk_index"],
-                "similarity_score": float(1 / (1 + dist))  # Convert distance to similarity
+                "hybrid_score": float(score)
             })
+        
+        return results
+    
+    def rerank(self, query: str, candidates: List[Dict], top_k: int = 5) -> List[Dict]:
+        """
+        Re-rank candidates using cross-encoder
+        """
+        if not candidates:
+            return []
+        
+        # Prepare query-document pairs
+        pairs = [[query, cand["text"]] for cand in candidates]
+        
+        # Score all pairs
+        scores = self.reranker.predict(pairs)
+        
+        # Add scores and sort
+        for i, cand in enumerate(candidates):
+            cand["rerank_score"] = float(scores[i])
+        
+        # Sort by rerank score and take top-k
+        reranked = sorted(candidates, key=lambda x: x["rerank_score"], reverse=True)[:top_k]
+        
+        logger.info(f"Re-ranked {len(candidates)} candidates to top-{top_k}")
+        return reranked
+    
+    def retrieve_with_citations(self, query: str, k: int = 3, use_hybrid: bool = True, use_reranking: bool = True) -> List[Dict]:
+        """
+        Two-stage retrieval:
+        1. Hybrid search (BM25 + semantic) - get top-20 candidates
+        2. Re-rank with cross-encoder - narrow to top-k
+        """
+        if self.index is None or len(self.chunks) == 0:
+            return []
+        
+        # Stage 1: Broad retrieval
+        if use_hybrid:
+            candidates = self.hybrid_search(query, k=20)
+        else:
+            # Fallback to pure semantic
+            semantic_results = self._semantic_search(query, k=20)
+            candidates = []
+            for idx, score in semantic_results:
+                candidates.append({
+                    "text": self.chunks[idx],
+                    "doc_id": self.metadata[idx]["doc_id"],
+                    "doc_name": self.metadata[idx]["doc_name"],
+                    "chunk_index": self.metadata[idx]["chunk_index"],
+                    "similarity_score": score
+                })
+        
+        # Stage 2: Re-ranking
+        if use_reranking and len(candidates) > k:
+            results = self.rerank(query, candidates, top_k=k)
+            # Add similarity_score for backward compatibility
+            for r in results:
+                if "similarity_score" not in r:
+                    r["similarity_score"] = r.get("rerank_score", r.get("hybrid_score", 0.5))
+        else:
+            results = candidates[:k]
+            for r in results:
+                if "similarity_score" not in r:
+                    r["similarity_score"] = r.get("hybrid_score", 0.5)
         
         return results
     

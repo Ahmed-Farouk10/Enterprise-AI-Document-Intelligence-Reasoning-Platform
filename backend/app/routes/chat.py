@@ -50,8 +50,15 @@ async def chat_with_document(request: ChatRequest):
         if request.use_query_rewriting:
             search_query = llm_service.rewrite_query(request.question)
         
-        # Step 1: RETRIEVE with Citations
-        raw_results = vector_store.retrieve_with_citations(search_query, k=5)
+        # Step 1: TWO-STAGE RETRIEVAL
+        # Stage 1: Hybrid Search (BM25 + Semantic) - get top-20 candidates
+        # Stage 2: Re-rank with cross-encoder - narrow to top-5
+        raw_results = vector_store.retrieve_with_citations(
+            search_query, 
+            k=5,
+            use_hybrid=True,
+            use_reranking=True
+        )
         
         if not raw_results:
             return {
@@ -59,7 +66,7 @@ async def chat_with_document(request: ChatRequest):
                 "answer": "I don't have enough context to answer that question.",
                 "confidence": "low",
                 "workflow": "no_retrieval",
-                "model": "flan-t5-self-rag-enhanced"
+                "model": "flan-t5-hybrid-self-rag"
             }
 
         # Step 2: SELF-REFLECT - Relevance Grading with Citation Tracking
@@ -108,13 +115,15 @@ async def chat_with_document(request: ChatRequest):
         else:
             logger.info("✓ Answer verified as factually supported")
 
-        # ENHANCEMENT 2: Citation Information
+        # ENHANCEMENT 2: Citation Information with Retrieval Scores
         citations = [
             {
                 "doc_name": r["doc_name"],
                 "doc_id": r["doc_id"],
                 "chunk_text": r["text"][:200] + "..." if len(r["text"]) > 200 else r["text"],
-                "similarity_score": round(r["similarity_score"], 3)
+                "similarity_score": round(r.get("similarity_score", 0.0), 3),
+                "hybrid_score": round(r.get("hybrid_score", 0.0), 3) if "hybrid_score" in r else None,
+                "rerank_score": round(r.get("rerank_score", 0.0), 3) if "rerank_score" in r else None
             }
             for r in relevant_results
         ]
@@ -126,12 +135,13 @@ async def chat_with_document(request: ChatRequest):
             "answer": final_answer,
             "confidence": confidence,
             "citations": citations,
-            "workflow": "self_rag_complete",
+            "workflow": "hybrid_self_rag_complete",
             "retrieved_chunks": len(raw_results),
             "relevant_chunks": len(relevant_results),
             "documents_searched": len(set(r["doc_name"] for r in raw_results)),
             "is_supported": is_supported,
-            "model": "flan-t5-self-rag-enhanced"
+            "retrieval_method": "hybrid + cross-encoder reranking",
+            "model": "flan-t5-hybrid-self-rag"
         }
 
     except Exception as e:
@@ -178,9 +188,11 @@ async def health_check():
     return {
         "status": "healthy",
         "model": "google/flan-t5-base",
-        "retrieval": "FAISS + all-MiniLM-L6-v2",
-        "workflow": "self-rag-enhanced (query rewriting + citations)",
+        "retrieval": "Hybrid (BM25 + Semantic) + Cross-Encoder Reranking",
+        "workflow": "two-stage self-rag (hybrid + rerank + reflect + critique)",
         "features": [
+            "Hybrid search (BM25 + semantic)",
+            "Cross-encoder re-ranking",
             "Multi-document RAG",
             "Citation tracking",
             "Query rewriting",
