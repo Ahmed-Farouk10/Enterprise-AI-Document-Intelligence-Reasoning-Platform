@@ -4,9 +4,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
-    title="Enterprise Document Intelligence API",
-    version="0.1.1",
-    description="Multimodal AI using 4 datasets: RVL-CDIP, FUNSD, SROIE, GAN"
+    title="Enterprise Document Intelligence API - Enhanced Self-RAG",
+    version="0.2.0",
+    description="Multi-document AI with Self-RAG: Citations, Query Rewriting, Hallucination Detection"
 )
 
 app.add_middleware(
