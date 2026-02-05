@@ -102,7 +102,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     const mappedDocuments = documents.map((doc) => ({
         id: doc.id,
         name: doc.originalName || doc.filename,
-        url: `http://localhost:8000/api/documents/${doc.id}/download`,
+        url: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/documents/${doc.id}/download`,
         date: new Date(doc.uploadedAt).toLocaleDateString(),
     }))
 

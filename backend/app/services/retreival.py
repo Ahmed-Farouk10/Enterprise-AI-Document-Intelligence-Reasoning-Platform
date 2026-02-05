@@ -9,6 +9,9 @@ from rank_bm25 import BM25Okapi
 logger = logging.getLogger(__name__)
 
 class VectorStore:
+import pickle
+import os
+
     def __init__(self):
         logger.info("Initializing Advanced Vector Store (Hybrid Search + Re-Ranking)...")
         self.model = SentenceTransformer('all-MiniLM-L6-v2')  # 80MB, fast
@@ -22,6 +25,49 @@ class VectorStore:
         self.tokenized_chunks = []  # For BM25
         logger.info("Models loaded: Bi-encoder + BM25 + Cross-encoder")
         
+        # Load from disk if exists
+        self.load_index()
+        
+    def save_index(self):
+        """Save vector store to disk"""
+        try:
+            data = {
+                "chunks": self.chunks,
+                "metadata": self.metadata,
+                "documents": self.documents,
+                "embeddings": self.index.reconstruct_n(0, self.index.ntotal) if self.index and self.index.ntotal > 0 else None
+            }
+            with open("vector_store.pkl", "wb") as f:
+                pickle.dump(data, f)
+            logger.info("Vector store saved to disk")
+        except Exception as e:
+            logger.error(f"Failed to save vector store: {e}")
+
+    def load_index(self):
+        """Load vector store from disk"""
+        if os.path.exists("vector_store.pkl"):
+            try:
+                with open("vector_store.pkl", "rb") as f:
+                    data = pickle.load(f)
+                    self.chunks = data.get("chunks", [])
+                    self.metadata = data.get("metadata", [])
+                    self.documents = data.get("documents", {})
+                    
+                    # Rebuild indexes
+                    embeddings = data.get("embeddings")
+                    if embeddings is not None and len(embeddings) > 0:
+                        self.index = faiss.IndexFlatL2(self.dimension)
+                        self.index.add(embeddings)
+                    
+                    # Rebuild BM25
+                    if self.chunks:
+                        self.tokenized_chunks = [c.lower().split() for c in self.chunks]
+                        self.bm25 = BM25Okapi(self.tokenized_chunks)
+                        
+                logger.info(f"Loaded {len(self.chunks)} chunks from persistence")
+            except Exception as e:
+                logger.error(f"Failed to load vector store: {e}")
+
     def clear(self):
         """Reset the vector store"""
         self.index = None
@@ -30,6 +76,8 @@ class VectorStore:
         self.documents = {}
         self.bm25 = None
         self.tokenized_chunks = []
+        if os.path.exists("vector_store.pkl"):
+            os.remove("vector_store.pkl")
         
     def add_document(self, text: str, doc_id: str = None, doc_name: str = None, chunk_size: int = 300):
         """
@@ -100,6 +148,8 @@ class VectorStore:
         # Build BM25 index
         self.tokenized_chunks = [chunk.lower().split() for chunk in self.chunks]
         self.bm25 = BM25Okapi(self.tokenized_chunks)
+        
+        self.save_index() # Persist changes
         
         logger.info(f"Added {len(chunks)} chunks from '{doc_name}' (ID: {doc_id}). Total chunks: {len(self.chunks)}")
         return doc_id

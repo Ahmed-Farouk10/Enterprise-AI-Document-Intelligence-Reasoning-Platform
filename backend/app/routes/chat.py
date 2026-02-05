@@ -108,14 +108,24 @@ async def send_message(session_id: str, message_data: ChatMessageCreate):
             )
             
             if retrieved_chunks:
-                # Step 3: Grade relevance (Self-RAG)
+                # Step 3: Grade relevance (Self-RAG) - RELAXED
                 relevant_chunks = []
                 for chunk in retrieved_chunks:
+                    # Try to grade, but if it fails or is strict, keep the chunk anyway for now
+                    # This ensures we don't get empty responses for valid queries
                     is_relevant = llm_service.grade_relevance(chunk["text"], message_data.content)
                     if is_relevant:
+                        chunk["relevance_score"] = 1.0
                         relevant_chunks.append(chunk)
                     else:
-                        logger.info(f"Filtered out irrelevant chunk from {chunk['doc_name']}")
+                        # Keep it but mark as potentially less relevant
+                        logger.info(f"Chunk graded irrelevant but keeping as fallback: {chunk['doc_name']}")
+                        chunk["relevance_score"] = 0.5
+                        relevant_chunks.append(chunk)
+
+                # Prioritize high relevance if we have many
+                if len([c for c in relevant_chunks if c.get("relevance_score", 0) > 0.8]) > 0:
+                    relevant_chunks = [c for c in relevant_chunks if c.get("relevance_score", 0) > 0.8]
                 
                 # Step 4: Generate answer from context
                 if relevant_chunks:
