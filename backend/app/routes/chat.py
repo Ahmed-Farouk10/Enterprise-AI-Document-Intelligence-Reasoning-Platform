@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from sqlalchemy.orm import Session
 from typing import List
 import asyncio
@@ -60,7 +60,7 @@ async def get_sessions(db: Session = Depends(get_db)):
 
 @router.post("/sessions", response_model=ChatSessionResponse)
 @limiter.limit("20/minute")
-async def create_session(request: Request, session_data: ChatSessionCreate, db: Session = Depends(get_db)):
+async def create_session(request: Request, response: Response, session_data: ChatSessionCreate, db: Session = Depends(get_db)):
     """Create a new chat session"""
     session = DatabaseService.create_chat_session(
         db=db,
@@ -129,7 +129,7 @@ async def delete_session(session_id: str, db: Session = Depends(get_db)):
 
 @router.post("/sessions/{session_id}/messages", response_model=ChatMessageResponse)
 @limiter.limit("50/minute")
-async def send_message(request: Request, session_id: str, message_data: ChatMessageCreate, db: Session = Depends(get_db)):
+async def send_message(request: Request, response: Response, session_id: str, message_data: ChatMessageCreate, db: Session = Depends(get_db)):
     """Send a message in a chat session with RAG"""
     
     # Check if session exists

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import shutil
@@ -20,7 +20,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 @router.post("/upload", response_model=DocumentResponse)
 @limiter.limit("10/hour")
-async def upload_document(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_document(request: Request, response: Response, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Upload a document and dispatch async processing job"""
     from app.core.logging_config import get_logger
     from app.workers.tasks import process_document_task
@@ -124,6 +124,7 @@ async def get_documents(
         "uploaded_at": doc.created_at.isoformat(),
         "processed_at": doc.updated_at.isoformat() if doc.status == "completed" else None,
         "status": doc.status,
+        "version": doc.version,
         "metadata": doc.extra_data or {}
     } for doc in documents]
     
@@ -155,6 +156,7 @@ async def get_document(document_id: str, db: Session = Depends(get_db)):
         "uploaded_at": document.created_at.isoformat(),
         "processed_at": document.updated_at.isoformat() if document.status == "completed" else None,
         "status": document.status,
+        "version": document.version,
         "metadata": document.extra_data or {}
     }
 
