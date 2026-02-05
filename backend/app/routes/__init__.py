@@ -1,6 +1,4 @@
-from . import upload
-from . import classify
-from . import extract
-from . import chat
+# Routes package
+from app.routes import documents, chat
 
-__all__ = ['upload', 'classify', 'extract', 'chat']
+__all__ = ["documents", "chat"]

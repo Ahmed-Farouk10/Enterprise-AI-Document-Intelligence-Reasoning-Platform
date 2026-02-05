@@ -1,202 +1,83 @@
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from app.services.retreival import vector_store
-from app.services.llm import llm_service
-import logging
-import json
-from typing import Optional, List
+from typing import List
 
-logger = logging.getLogger(__name__)
-router = APIRouter()
+from app.schemas import (
+    ChatSessionCreate, 
+    ChatSessionResponse, 
+    ChatMessageCreate, 
+    ChatMessageResponse
+)
+from app.database import Database
 
-class ChatRequest(BaseModel):
-    context_text: str = None
-    question: str
-    doc_id: str = None
-    doc_name: str = None
-    use_query_rewriting: bool = True
+router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-class MultiDocRequest(BaseModel):
-    documents: List[dict]  # [{"text": "...", "name": "..."}]
-    question: str
+@router.get("/sessions", response_model=List[ChatSessionResponse])
+async def get_sessions():
+    """Get all chat sessions"""
+    sessions = Database.get_all_sessions()
+    
+    # Add messages to each session
+    for session in sessions:
+        session["messages"] = []  # Don't load all messages in list view
+    
+    return sessions
 
-@router.post("/")
-async def chat_with_document(request: ChatRequest):
-    """
-    Enhanced Self-RAG Endpoint with:
-    - Multi-document support
-    - Citation tracking
-    - Query rewriting
-    - Confidence scoring
-    """
-    try:
-        # Index new document if provided
-        if request.context_text:
-            doc_id = vector_store.add_document(
-                request.context_text,
-                doc_id=request.doc_id,
-                doc_name=request.doc_name
-            )
-            logger.info(f"Indexed document: {doc_id}")
+@router.post("/sessions", response_model=ChatSessionResponse)
+async def create_session(session_data: ChatSessionCreate):
+    """Create a new chat session"""
+    session = Database.create_chat_session(
+        title=session_data.title,
+        document_ids=session_data.document_ids
+    )
+    session["messages"] = []
+    return session
 
-        if not request.question:
-            raise HTTPException(400, "Question is required.")
+@router.get("/sessions/{session_id}", response_model=ChatSessionResponse)
+async def get_session(session_id: str):
+    """Get a specific chat session with all messages"""
+    session = Database.get_chat_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return session
 
-        # ENHANCEMENT 1: Query Rewriting
-        original_question = request.question
-        search_query = request.question
-        
-        if request.use_query_rewriting:
-            search_query = llm_service.rewrite_query(request.question)
-        
-        # Step 1: TWO-STAGE RETRIEVAL
-        # Stage 1: Hybrid Search (BM25 + Semantic) - get top-20 candidates
-        # Stage 2: Re-rank with cross-encoder - narrow to top-5
-        raw_results = vector_store.retrieve_with_citations(
-            search_query, 
-            k=5,
-            use_hybrid=True,
-            use_reranking=True
-        )
-        
-        if not raw_results:
-            return {
-                "status": "success",
-                "answer": "I don't have enough context to answer that question.",
-                "confidence": "low",
-                "workflow": "no_retrieval",
-                "model": "flan-t5-hybrid-self-rag"
-            }
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a chat session"""
+    success = Database.delete_chat_session(session_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return {"success": True, "message": "Session deleted successfully"}
 
-        # Step 2: SELF-REFLECT - Relevance Grading with Citation Tracking
-        logger.info(f"Grading {len(raw_results)} retrieved chunks for relevance...")
-        relevant_results = []
-        filtered_sources = []
-        
-        for result in raw_results:
-            if llm_service.grade_relevance(result["text"], request.question):
-                relevant_results.append(result)
-                logger.info(f"✓ Chunk from '{result['doc_name']}' deemed relevant (score: {result['similarity_score']:.3f})")
-            else:
-                filtered_sources.append(result["doc_name"])
-                logger.info(f"✗ Chunk filtered out (irrelevant)")
-        
-        # Fallback if everything was filtered out
-        if not relevant_results:
-            return {
-                "status": "success",
-                "answer": "I couldn't find relevant information in the document(s) for that specific question.",
-                "confidence": "low",
-                "workflow": "all_chunks_filtered",
-                "retrieved_chunks": len(raw_results),
-                "relevant_chunks": 0,
-                "documents_searched": len(set(r["doc_name"] for r in raw_results)),
-                "model": "flan-t5-self-rag-enhanced"
-            }
+@router.post("/sessions/{session_id}/messages", response_model=ChatMessageResponse)
+async def send_message(session_id: str, message_data: ChatMessageCreate):
+    """Send a message in a chat session"""
+    
+    # Check if session exists
+    session = Database.get_chat_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    
+    # Create user message
+    user_message = Database.create_message(
+        session_id=session_id,
+        role="user",
+        content=message_data.content
+    )
+    
+    # Generate AI response (simplified - just echo for now)
+    ai_response_content = f"I received your message: '{message_data.content}'. This is a placeholder response. In production, this would call your AI model."
+    
+    ai_message = Database.create_message(
+        session_id=session_id,
+        role="assistant",
+        content=ai_response_content
+    )
+    
+    # Return the AI message (frontend will optimistically add user message)
+    return ai_message
 
-        # Step 3: GENERATE - Create answer from relevant chunks
-        context_block = " ".join([r["text"] for r in relevant_results])
-        logger.info("Generating answer from relevant chunks...")
-        answer = llm_service.generate_answer(context_block, request.question)
-
-        # Step 4: CRITIQUE - Hallucination Check
-        logger.info("Checking answer for factual support...")
-        is_supported = llm_service.grade_hallucination(context_block, answer)
-        
-        # Step 5: RESPOND with Citations
-        final_answer = answer
-        confidence = "high"
-        
-        if not is_supported:
-            final_answer = f"(Uncertain) {answer}\n\n[Note: This answer might not be fully supported by the document text.]"
-            confidence = "medium"
-            logger.warning("Answer flagged as potentially unsupported")
-        else:
-            logger.info("✓ Answer verified as factually supported")
-
-        # ENHANCEMENT 2: Citation Information with Retrieval Scores
-        citations = [
-            {
-                "doc_name": r["doc_name"],
-                "doc_id": r["doc_id"],
-                "chunk_text": r["text"][:200] + "..." if len(r["text"]) > 200 else r["text"],
-                "similarity_score": round(r.get("similarity_score", 0.0), 3),
-                "hybrid_score": round(r.get("hybrid_score", 0.0), 3) if "hybrid_score" in r else None,
-                "rerank_score": round(r.get("rerank_score", 0.0), 3) if "rerank_score" in r else None
-            }
-            for r in relevant_results
-        ]
-
-        return {
-            "status": "success",
-            "question": original_question,
-            "rewritten_query": search_query if search_query != original_question else None,
-            "answer": final_answer,
-            "confidence": confidence,
-            "citations": citations,
-            "workflow": "hybrid_self_rag_complete",
-            "retrieved_chunks": len(raw_results),
-            "relevant_chunks": len(relevant_results),
-            "documents_searched": len(set(r["doc_name"] for r in raw_results)),
-            "is_supported": is_supported,
-            "retrieval_method": "hybrid + cross-encoder reranking",
-            "model": "flan-t5-hybrid-self-rag"
-        }
-
-    except Exception as e:
-        logger.error(f"Chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/multi-doc")
-async def chat_multi_document(request: MultiDocRequest):
-    """
-    Upload and query multiple documents at once
-    """
-    try:
-        # Clear and index all documents
-        vector_store.clear()
-        doc_ids = []
-        
-        for idx, doc in enumerate(request.documents):
-            doc_id = vector_store.add_document(
-                text=doc.get("text", ""),
-                doc_name=doc.get("name", f"Document {idx+1}")
-            )
-            doc_ids.append(doc_id)
-        
-        logger.info(f"Indexed {len(doc_ids)} documents")
-        
-        # Use standard chat flow
-        chat_req = ChatRequest(question=request.question)
-        return await chat_with_document(chat_req)
-        
-    except Exception as e:
-        logger.error(f"Multi-doc chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/documents")
-async def list_documents():
-    """Get list of all indexed documents"""
-    return {
-        "status": "success",
-        "documents": vector_store.get_document_list()
-    }
-
-@router.get("/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "model": "google/flan-t5-base",
-        "retrieval": "Hybrid (BM25 + Semantic) + Cross-Encoder Reranking",
-        "workflow": "two-stage self-rag (hybrid + rerank + reflect + critique)",
-        "features": [
-            "Hybrid search (BM25 + semantic)",
-            "Cross-encoder re-ranking",
-            "Multi-document RAG",
-            "Citation tracking",
-            "Query rewriting",
-            "Relevance grading",
-            "Hallucination detection"
-        ]
-    }
+@router.post("/sessions/{session_id}/stream", response_model=ChatMessageResponse)
+async def stream_message(session_id: str, message_data: ChatMessageCreate):
+    """Stream a message response (placeholder for now)"""
+    # For now, just use the regular send_message
+    return await send_message(session_id, message_data)
