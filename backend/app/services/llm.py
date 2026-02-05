@@ -1,15 +1,16 @@
-from transformers import T5Tokenizer, T5ForConditionalGeneration, TextIteratorStreamer
+from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
 import logging
 import threading
 import time
 import os
+import torch
 
 logger = logging.getLogger(__name__)
 
 class LLMService:
     def __init__(self):
-        # Default to large model for decent reasoning (fits in 16GB RAM)
-        self.model_name = os.getenv("LLM_MODEL", "google/flan-t5-large")
+        # Upgrade to Qwen2.5-1.5B-Instruct (SOTA for <3B params)
+        self.model_name = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
         self.tokenizer = None
         self.model = None
         
@@ -21,11 +22,12 @@ class LLMService:
         logger.info(f"Loading LLM ({self.model_name})...")
         
         try:
-            from transformers import T5Tokenizer, T5ForConditionalGeneration
-            self.tokenizer = T5Tokenizer.from_pretrained(self.model_name, legacy=False)
-            self.model = T5ForConditionalGeneration.from_pretrained(
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name, 
-                low_cpu_mem_usage=True
+                torch_dtype=torch.float32, 
+                low_cpu_mem_usage=True,
+                trust_remote_code=True
             )
             logger.info("LLM loaded successfully")
         except Exception as e:
@@ -36,56 +38,74 @@ class LLMService:
         if self.model is None:
             self.load_model()
 
-    def _run_inference(self, prompt: str, max_length: int = 64) -> str:
-        """Helper to run model generation"""
+    def _run_inference(self, messages: list, max_new_tokens: int = 512, temperature: float = 0.4) -> str:
+        """Helper to run model generation using chat templates"""
         self._ensure_model_loaded()
-        # Note: True timeout for blocking CPU tasks in Python requires multiprocessing
-        # For now we rely on logical constraints and max_length
+        
+        # Proper chat template handling
+        text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        
         input_ids = self.tokenizer(
-            prompt, 
+            text, 
             return_tensors="pt", 
-            max_length=512, 
-            truncation=True
+            truncation=True,
+            max_length=4096 # Large context for Qwen
         ).input_ids
         
         outputs = self.model.generate(
             input_ids, 
-            max_length=max_length, 
-            num_beams=1, 
+            max_new_tokens=max_new_tokens,
             do_sample=True,
-            temperature=0.5,
+            temperature=temperature,
             top_p=0.9,
-            repetition_penalty=1.0, # Disable penalty to allow bullet points
-            max_time=60.0
+            repetition_penalty=1.1,
+            max_time=90.0
         )
-        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Decode only the new tokens
+        return self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
 
-    def stream_inference(self, prompt: str, max_length: int = 256):
+    def stream_inference(self, message: str, context: str = ""):
         """
-        Generator that yields tokens as they are generated.
+        Generator for streaming response
         """
         self._ensure_model_loaded()
+        
+        # Build messages for Chat Template
+        messages = [
+            {"role": "system", "content": "You are Qwen, a helpful and precise document assistant. Answer the user's question based ONLY on the provided context. If the answer is not in the context, say 'I cannot find the answer'."},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{message}"}
+        ]
+
+        text = self.tokenizer.apply_chat_template(
+            messages, 
+            tokenize=False, 
+            add_generation_prompt=True
+        )
+
         input_ids = self.tokenizer(
-            prompt, 
+            text, 
             return_tensors="pt", 
-            max_length=512, 
-            truncation=True
+            truncation=True,
+            max_length=8192 # Support larger docs
         ).input_ids
 
-        streamer = TextIteratorStreamer(self.tokenizer, skip_special_tokens=True)
+        streamer = TextIteratorStreamer(self.tokenizer, skip_special_tokens=True, skip_prompt=True)
         
         generation_kwargs = dict(
             input_ids=input_ids,
             streamer=streamer,
-            max_length=max_length,
+            max_new_tokens=1024,
             do_sample=True,
-            temperature=0.5,
-            top_p=0.9,
-            repetition_penalty=1.0, 
-            max_time=60.0
+            temperature=0.4,
+            repetition_penalty=1.1,
+            max_time=120.0
         )
 
-        # Run generation in a separate thread so we can yield from the streamer
         thread = threading.Thread(target=self.model.generate, kwargs=generation_kwargs)
         thread.start()
 
@@ -96,14 +116,17 @@ class LLMService:
         """
         Query rewriting: Expand complex questions into clearer search queries
         """
-        prompt = f"""Task: Rewrite this question to be clearer and more specific for document search.
-Question: {question}
-Rewritten:"""
+        messages = [
+            {"role": "system", "content": "You are a search query optimizer. Rewrite the user's question to be clearer and more specific for document retrieval. Return ONLY the rewritten query."},
+            {"role": "user", "content": f"Question: {question}"}
+        ]
         
-        rewritten = self._run_inference(prompt, max_length=64)
+        rewritten = self._run_inference(messages, max_new_tokens=128, temperature=0.3)
         
-        # Only use rewrite if it's substantially different and not malformed
-        if len(rewritten) > 5 and rewritten.lower() != question.lower():
+        # Clean up if model is chatty
+        rewritten = rewritten.strip().strip('"').strip("'")
+        
+        if len(rewritten) > 5:
             logger.info(f"Query rewritten: '{question}' -> '{rewritten}'")
             return rewritten
         return question
@@ -111,30 +134,34 @@ Rewritten:"""
     def grade_relevance(self, context: str, question: str) -> bool:
         """
         Self-RAG Step 1: Retrieval Grading
-        Check if the retrieved chunk is actually relevant to the question.
         """
-        prompt = f"""Task: Determine if the context is relevant to the question. Answer 'yes' or 'no'.
-Question: {question}
-Context: {context}
-Relevant:"""
+        messages = [
+            {"role": "system", "content": "You are a relevance grader. Determine if the context is relevant to the question. Answer only 'yes' or 'no'."},
+            {"role": "user", "content": f"Question: {question}\n\nContext: {context}"}
+        ]
         
-        response = self._run_inference(prompt, max_length=5)
+        response = self._run_inference(messages, max_new_tokens=10, temperature=0.1)
         return "yes" in response.lower()
 
     def grade_hallucination(self, context: str, answer: str) -> bool:
         """
         Self-RAG Step 2: Critique Token
-        Check if the answer is supported by the context (Fact-checking).
         """
-        prompt = f"""Task: Determine if the answer is supported by the context. Answer 'yes' or 'no'.
-Context: {context}
-Answer: {answer}
-Supported:"""
+        messages = [
+            {"role": "system", "content": "You are a fact checker. Determine if the answer is fully supported by the context. Answer only 'yes' or 'no'."},
+            {"role": "user", "content": f"Context: {context}\n\nAnswer: {answer}"}
+        ]
         
-        response = self._run_inference(prompt, max_length=5)
+        response = self._run_inference(messages, max_new_tokens=10, temperature=0.1)
         return "yes" in response.lower()
 
-        input_text = f"Question: {question}\n\nRead the documents below and answer in detail. Use bullet points. If not found, say 'I cannot find the answer'.\n\nContext: {context}\n\nAnswer:"
+    def generate_answer(self, context: str, question: str) -> str:
+        """Standard generation"""
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant. Answer the user's question based ONLY on the provided documents. Use detailed bullet points where appropriate."},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{question}"}
+        ]
+        return self._run_inference(messages, max_new_tokens=1024)
 
 # Singleton
 llm_service = LLMService()
