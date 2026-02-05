@@ -239,13 +239,13 @@ async def send_message(request: Request, session_id: str, message_data: ChatMess
             else:
                 ai_response_content = "No documents found. Please upload documents first."
                 document_context = None
-        else:
-            # Fallback when no documents or model not available
-            if not LLM_AVAILABLE:
-                ai_response_content = "⚠️ AI model is initializing. Please wait 10-20 seconds and try again."
             else:
-                ai_response_content = "📄 No documents uploaded yet. Please upload documents to enable Q&A."
-            document_context = None
+                # Fallback when no documents or model not available
+                if not LLM_AVAILABLE:
+                    ai_response_content = "⚠️ AI model is initializing. Please wait 10-20 seconds and try again."
+                else:
+                    ai_response_content = "📄 No documents uploaded yet. Please upload documents to enable Q&A."
+                document_context = None
     
     except Exception as e:
         logger.error("rag_pipeline_error", session_id=session_id, error=str(e), exc_info=True)
