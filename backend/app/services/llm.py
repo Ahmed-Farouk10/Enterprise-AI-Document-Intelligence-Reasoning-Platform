@@ -51,7 +51,6 @@ class LLMService:
         outputs = self.model.generate(
             input_ids, 
             max_length=max_length, 
-            max_length=max_length, 
             num_beams=2, 
             early_stopping=True,
             repetition_penalty=1.2,
