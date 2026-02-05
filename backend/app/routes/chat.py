@@ -236,9 +236,7 @@ async def send_message(request: Request, session_id: str, message_data: ChatMess
                 else:
                     ai_response_content = "I found some documents, but none were relevant to your question. Could you rephrase?"
                     document_context = None
-            else:
-                ai_response_content = "No documents found. Please upload documents first."
-                document_context = None
+
             else:
                 # Fallback when no documents or model not available
                 if not LLM_AVAILABLE:

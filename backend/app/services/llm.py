@@ -10,12 +10,20 @@ class LLMService:
         import os
         # Default to small model for production stability on free tier
         self.model_name = os.getenv("LLM_MODEL", "google/flan-t5-small")
+        self.tokenizer = None
+        self.model = None
+        
+    def load_model(self):
+        """Lazy load the model"""
+        if self.model is not None:
+            return
+
+        import os
         logger.info(f"Loading LLM ({self.model_name})...")
         
         try:
+            from transformers import T5Tokenizer, T5ForConditionalGeneration
             self.tokenizer = T5Tokenizer.from_pretrained(self.model_name, legacy=False)
-            # Optimize loading: 
-            # 1. low_cpu_mem_usage=True reduces RAM usage during load
             self.model = T5ForConditionalGeneration.from_pretrained(
                 self.model_name, 
                 low_cpu_mem_usage=True
@@ -23,17 +31,15 @@ class LLMService:
             logger.info("LLM loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load LLM: {e}")
-            # Fallback to small model if base fails
-            if self.model_name != "google/flan-t5-small":
-                logger.warning("Falling back to flan-t5-small due to memory/load error")
-                self.model_name = "google/flan-t5-small"
-                self.tokenizer = T5Tokenizer.from_pretrained(self.model_name, legacy=False)
-                self.model = T5ForConditionalGeneration.from_pretrained(self.model_name)
-            else:
-                raise e
+            raise e
+
+    def _ensure_model_loaded(self):
+        if self.model is None:
+            self.load_model()
 
     def _run_inference(self, prompt: str, max_length: int = 64) -> str:
         """Helper to run model generation"""
+        self._ensure_model_loaded()
         # Note: True timeout for blocking CPU tasks in Python requires multiprocessing
         # For now we rely on logical constraints and max_length
         input_ids = self.tokenizer(
