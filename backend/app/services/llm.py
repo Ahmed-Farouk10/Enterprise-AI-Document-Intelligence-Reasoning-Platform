@@ -64,6 +64,7 @@ class LLMService:
         """
         Generator that yields tokens as they are generated.
         """
+        self._ensure_model_loaded()
         input_ids = self.tokenizer(
             prompt, 
             return_tensors="pt", 
