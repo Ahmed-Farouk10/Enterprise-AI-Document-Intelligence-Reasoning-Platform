@@ -21,12 +21,14 @@ try:
     from app.services.llm import llm_service
     from app.services.retreival import vector_store
     LLM_AVAILABLE = True
+    LLM_INIT_ERROR = None
 except Exception as e:
     logger = get_logger(__name__)
     logger.warning("llm_services_unavailable", error=str(e))
     llm_service = None
     vector_store = None
     LLM_AVAILABLE = False
+    LLM_INIT_ERROR = str(e)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 logger = get_logger(__name__)
@@ -288,7 +290,12 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
         
         # RAG Logic (Simplified for streaming)
         try:
-            if LLM_AVAILABLE and len(vector_store.chunks) > 0:
+            if not LLM_AVAILABLE:
+                logger.error(f"LLM not available during stream. Init error: {LLM_INIT_ERROR}")
+                yield f"data: {json.dumps({'type': 'error', 'content': f'AI Service Unavailable: {LLM_INIT_ERROR}. Please check backend logs.'})}\n\n"
+                return
+
+            if len(vector_store.chunks) > 0:
                 # Rewrite query
                 rewritten_query = llm_service.rewrite_query(message_data.content)
                 yield f"data: {json.dumps({'type': 'status', 'content': 'Searching documents...'})}\n\n"
