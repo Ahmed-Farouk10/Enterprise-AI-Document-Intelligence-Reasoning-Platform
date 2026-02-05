@@ -1,0 +1,170 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: docucentric-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-docucentric}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme123}
+      POSTGRES_DB: ${POSTGRES_DB:-docucentric}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-docucentric}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - docucentric-network
+
+  # Redis (Cache + Job Queue)
+  redis:
+    image: redis:7-alpine
+    container_name: docucentric-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme123}
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - docucentric-network
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: docucentric-qdrant
+    ports:
+      - "6333:6333"  # HTTP API
+      - "6334:6334"  # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - docucentric-network
+
+  # Backend API (FastAPI)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docucentric-backend
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-docucentric}:${POSTGRES_PASSWORD:-changeme123}@postgres:5432/${POSTGRES_DB:-docucentric}
+      
+      # Redis
+      REDIS_URL: redis://:{REDIS_PASSWORD:-changeme123}@redis:6379/0
+      
+      # Qdrant
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      JSON_LOGS: ${JSON_LOGS:-true}
+      
+      # HuggingFace
+      HF_TOKEN: ${HF_TOKEN:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - backend_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - docucentric-network
+
+  # Celery Worker (Background Jobs)
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docucentric-celery-worker
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-docucentric}:${POSTGRES_PASSWORD:-changeme123}@postgres:5432/${POSTGRES_DB:-docucentric}
+      
+      # Redis
+      REDIS_URL: redis://:{REDIS_PASSWORD:-changeme123}@redis:6379/0
+      
+      # Qdrant
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      JSON_LOGS: ${JSON_LOGS:-true}
+      
+      # HuggingFace
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ./backend:/app
+      - backend_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app worker --loglevel=info
+    networks:
+      - docucentric-network
+
+  # Frontend (Next.js) - Optional for development
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: docucentric-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    command: npm run dev
+    networks:
+      - docucentric-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  backend_uploads:
+    driver: local
+
+networks:
+  docucentric-network:
+    driver: bridge

@@ -1,11 +1,16 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
-from typing import List
-import os
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request
+from sqlalchemy.orm import Session
+from typing import List, Optional
 import shutil
+import os
 from pathlib import Path
 
-from app.schemas import DocumentResponse, PaginatedDocuments, PaginationMeta
-from app.database import Database
+from app.schemas import DocumentResponse, PaginatedDocuments
+from app.db.database import get_db
+from app.db.models import Document
+from app.db.service import DatabaseService
+from app.services.retreival import vector_store
+from app.core.rate_limiter import limiter
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -14,11 +19,14 @@ UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 @router.post("/upload", response_model=DocumentResponse)
-async def upload_document(file: UploadFile = File(...)):
-    """Upload a document and process it for RAG"""
-    import logging
+@limiter.limit("10/hour")
+async def upload_document(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Upload a document and dispatch async processing job"""
+    from app.core.logging_config import get_logger
+    from app.workers.tasks import process_document_task
     import uuid
-    logger = logging.getLogger(__name__)
+    
+    logger = get_logger(__name__)
     
     # Validate file type
     allowed_types = ["application/pdf", "text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
@@ -38,69 +46,59 @@ async def upload_document(file: UploadFile = File(...)):
         
         file_size = os.path.getsize(file_path)
         
-        # Create document record with processing status
-        document = Database.create_document(
+        # Check for existing versions
+        existing_docs = db.query(Document).filter(
+            Document.original_name == file.filename
+        ).order_by(Document.version.desc()).first()
+        
+        new_version = 1
+        if existing_docs:
+            new_version = existing_docs.version + 1
+            
+        # Create document record in database with "pending" status
+        document = DatabaseService.create_document(
+            db=db,
             filename=unique_filename,
             original_name=file.filename,
             file_size=file_size,
-            mime_type=file.content_type
+            mime_type=file.content_type,
+            version=new_version
         )
         
-        # Process document asynchronously (extract text and add to vector store)
-        try:
-            from app.services.retreival import vector_store
-            
-            # Extract text based on file type
-            if file.content_type == "text/plain":
-                # Plain text
-                with open(file_path, "r", encoding="utf-8") as f:
-                    text = f.read()
-            elif file.content_type == "application/pdf":
-                # PDF extraction
-                try:
-                    import pdfplumber
-                    with pdfplumber.open(file_path) as pdf:
-                        text = "\n\n".join([page.extract_text() or "" for page in pdf.pages])
-                        document["metadata"]["page_count"] = len(pdf.pages)
-                except Exception as e:
-                    logger.error(f"PDF extraction failed: {e}")
-                    text = ""
-            elif "wordprocessingml" in file.content_type:
-                # DOCX extraction
-                try:
-                    from docx import Document as DocxDocument
-                    doc = DocxDocument(file_path)
-                    text = "\n\n".join([para.text for para in doc.paragraphs])
-                except Exception as e:
-                    logger.error(f"DOCX extraction failed: {e}")
-                    text = ""
-            else:
-                text = ""
-            
-            # Add to vector store if text extracted
-            if text and len(text.strip()) > 50:
-                vector_store.add_document(
-                    text=text,
-                    doc_id=document["id"],
-                    doc_name=file.filename
-                )
-                document["metadata"]["extracted_text"] = text[:500] + "..." if len(text) > 500 else text
-                document["metadata"]["vector_store_id"] = document["id"]
-                document["status"] = "completed"
-                logger.info(f"Document {file.filename} processed and added to vector store")
-            else:
-                document["status"] = "failed"
-                document["metadata"]["error"] = "Could not extract text from document"
-                logger.warning(f"No text extracted from {file.filename}")
-                
-        except Exception as e:
-            logger.error(f"Document processing error: {e}", exc_info=True)
-            document["status"] = "failed"
-            document["metadata"]["error"] = str(e)
+        # Set initial status to pending
+        document.status = "pending"
+        db.commit()
+        db.refresh(document)
         
-        return document
+        # Dispatch async processing task
+        task = process_document_task.delay(
+            doc_id=document.id,
+            file_path=unique_filename,
+            mime_type=file.content_type,
+            filename=file.filename
+        )
+        
+        logger.info("document_upload_queued", doc_id=document.id, filename=file.filename, 
+                   task_id=task.id, file_size=file_size)
+        
+        # Return immediately with pending status
+        return {
+            "id": document.id,
+            "filename": document.filename,
+            "original_name": document.original_name,
+            "file_size": document.file_size,
+            "mime_type": document.mime_type,
+            "uploaded_at": document.created_at.isoformat(),
+            "processed_at": None,
+            "status": "pending",
+            "metadata": {
+                "task_id": task.id,
+                "message": "Document uploaded successfully. Processing in background."
+            }
+        }
     
     except Exception as e:
+        logger.error("document_upload_failed", error=str(e), exc_info=True)
         # Clean up file if database operation fails
         if file_path.exists():
             os.remove(file_path)
@@ -109,16 +107,30 @@ async def upload_document(file: UploadFile = File(...)):
 @router.get("", response_model=PaginatedDocuments)
 async def get_documents(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100)
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
 ):
     """Get all documents with pagination"""
     skip = (page - 1) * page_size
-    documents, total = Database.get_documents(skip=skip, limit=page_size)
+    documents, total = DatabaseService.get_documents(db, skip=skip, limit=page_size)
+    
+    # Convert ORM objects to dicts
+    items = [{
+        "id": doc.id,
+        "filename": doc.filename,
+        "original_name": doc.original_name,
+        "file_size": doc.file_size,
+        "mime_type": doc.mime_type,
+        "uploaded_at": doc.created_at.isoformat(),
+        "processed_at": doc.updated_at.isoformat() if doc.status == "completed" else None,
+        "status": doc.status,
+        "metadata": doc.extra_data or {}
+    } for doc in documents]
     
     total_pages = (total + page_size - 1) // page_size
     
     return {
-        "items": documents,
+        "items": items,
         "meta": {
             "page": page,
             "page_size": page_size,
@@ -128,57 +140,69 @@ async def get_documents(
     }
 
 @router.get("/{document_id}", response_model=DocumentResponse)
-async def get_document(document_id: str):
+async def get_document(document_id: str, db: Session = Depends(get_db)):
     """Get a specific document"""
-    document = Database.get_document(document_id)
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return document
-
-@router.delete("/{document_id}")
-async def delete_document(document_id: str):
-    """Delete a document"""
-    document = Database.get_document(document_id)
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # Delete file from disk
-    file_path = UPLOAD_DIR / document["filename"]
-    if file_path.exists():
-        os.remove(file_path)
-    
-    # Delete from database
-    Database.delete_document(document_id)
-    
-    return {"success": True, "message": "Document deleted successfully"}
-
-@router.get("/{document_id}/status")
-async def get_document_status(document_id: str):
-    """Get document processing status"""
-    document = Database.get_document(document_id)
+    document = DatabaseService.get_document(db, document_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
     return {
-        "status": document["status"],
-        "progress": 100 if document["status"] == "completed" else 0
+        "id": document.id,
+        "filename": document.filename,
+        "original_name": document.original_name,
+        "file_size": document.file_size,
+        "mime_type": document.mime_type,
+        "uploaded_at": document.created_at.isoformat(),
+        "processed_at": document.updated_at.isoformat() if document.status == "completed" else None,
+        "status": document.status,
+        "metadata": document.extra_data or {}
     }
 
-@router.get("/{document_id}/download")
-async def download_document(document_id: str):
-    """Download or view a document"""
-    from fastapi.responses import FileResponse
-    
-    document = Database.get_document(document_id)
+@router.delete("/{document_id}")
+async def delete_document(document_id: str, db: Session = Depends(get_db)):
+    """Delete a document"""
+    document = DatabaseService.get_document(db, document_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    file_path = UPLOAD_DIR / document["filename"]
+    # Delete file from disk
+    file_path = UPLOAD_DIR / document.filename
+    if file_path.exists():
+        os.remove(file_path)
+    
+    # Delete from database
+    DatabaseService.delete_document(db, document_id)
+    
+    return {"success": True, "message": "Document deleted successfully"}
+
+@router.get("/{document_id}/status")
+async def get_document_status(document_id: str, db: Session = Depends(get_db)):
+    """Get document processing status"""
+    document = DatabaseService.get_document(db, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    return {
+        "status": document.status,
+        "progress": 100 if document.status == "completed" else 0
+    }
+
+@router.get("/{document_id}/download")
+async def download_document(document_id: str, db: Session = Depends(get_db)):
+    """Download or view a document"""
+    from fastapi.responses import FileResponse
+    
+    document = DatabaseService.get_document(db, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    file_path = UPLOAD_DIR / document.filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
     
     return FileResponse(
         path=file_path,
-        filename=document["original_name"],
-        media_type=document["mime_type"]
+        filename=document.original_name,
+        media_type=document.mime_type
     )
+

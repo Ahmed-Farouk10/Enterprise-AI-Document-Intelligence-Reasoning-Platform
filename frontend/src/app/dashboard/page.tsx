@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useChat } from '@/hooks/use-chat'
 import { useState, useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
+import { BotMessageSkeleton } from '@/components/skeletons'
 
 export default function Page() {
     const { messages, sendMessage, isTyping, error } = useChat()
@@ -40,6 +41,16 @@ export default function Page() {
         e.preventDefault()
 
         if (!inputValue.trim() || isSending) return
+
+        // validation
+        try {
+            const { ChatInputSchema } = require("@/lib/validation")
+            ChatInputSchema.parse({ message: inputValue })
+        } catch (err: any) {
+            const { toast } = require("sonner")
+            toast.error(err.errors?.[0]?.message || "Invalid message")
+            return
+        }
 
         const messageContent = inputValue.trim()
         setInputValue('')
@@ -114,15 +125,7 @@ export default function Page() {
                                     </div>
                                 ))}
                                 {isTyping && (
-                                    <div className="flex gap-3 justify-start">
-                                        <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-3">
-                                            <div className="flex gap-1">
-                                                <span className="size-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '0ms' }} />
-                                                <span className="size-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '150ms' }} />
-                                                <span className="size-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '300ms' }} />
-                                            </div>
-                                        </div>
-                                    </div>
+                                    <BotMessageSkeleton />
                                 )}
                                 <div ref={messagesEndRef} />
                             </div>

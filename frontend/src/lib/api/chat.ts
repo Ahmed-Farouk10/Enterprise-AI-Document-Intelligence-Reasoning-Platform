@@ -52,14 +52,48 @@ export const ChatAPI = {
     async streamMessage(
         sessionId: string,
         content: string,
-        onChunk: (chunk: string) => void,
-        documentIds?: string[]
-    ) {
-        // This would use EventSource or WebSocket for streaming
-        // Placeholder implementation
-        return ApiClient.post<ChatMessage>(`/api/chat/sessions/${sessionId}/stream`, {
-            content,
-            document_ids: documentIds,
-        })
+        onChunk: (chunk: any) => void
+    ): Promise<void> {
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+        try {
+            const response = await fetch(`${API_URL}/api/chat/sessions/${sessionId}/stream`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ content })
+            });
+
+            if (!response.ok) throw new Error(response.statusText);
+
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+
+            if (!reader) return;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                // Handle multiple SSE messages in one chunk
+                const lines = chunk.split('\n\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            onChunk(data);
+                        } catch (e) {
+                            console.error('Error parsing SSE chunk', e);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Stream error', error);
+            throw error;
+        }
     },
 }

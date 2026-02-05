@@ -21,6 +21,21 @@ export function NavUpload({ onUpload, uploading = false, uploadProgress = 0, upl
     const [isDragging, setIsDragging] = useState(false)
 
     const handleFileSelect = async (file: File) => {
+        // Validation
+        try {
+            const { FileUploadSchema } = require("@/lib/validation")
+            FileUploadSchema.parse({ file })
+        } catch (err: any) {
+            const { toast } = require("@/hooks/use-toast")
+            toast({
+                title: "Invalid File",
+                description: err.errors?.[0]?.message || "Invalid file",
+                variant: "destructive"
+            })
+            if (fileInputRef.current) fileInputRef.current.value = ""
+            return
+        }
+
         if (onUpload) {
             await onUpload(file)
         }
@@ -75,8 +90,8 @@ export function NavUpload({ onUpload, uploading = false, uploadProgress = 0, upl
                         onDrop={handleDrop}
                         disabled={uploading}
                         className={`flex h-32 w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-4 text-sidebar-foreground transition-all ${isDragging
-                                ? 'border-primary bg-primary/10'
-                                : 'border-sidebar-border bg-sidebar-accent/30 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                            ? 'border-primary bg-primary/10'
+                            : 'border-sidebar-border bg-sidebar-accent/30 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                             } ${uploading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
                             } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring`}
                     >

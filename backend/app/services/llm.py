@@ -1,5 +1,7 @@
-from transformers import T5Tokenizer, T5ForConditionalGeneration
+from transformers import T5Tokenizer, T5ForConditionalGeneration, TextIteratorStreamer
 import logging
+import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +15,8 @@ class LLMService:
 
     def _run_inference(self, prompt: str, max_length: int = 64) -> str:
         """Helper to run model generation"""
+        # Note: True timeout for blocking CPU tasks in Python requires multiprocessing
+        # For now we rely on logical constraints and max_length
         input_ids = self.tokenizer(
             prompt, 
             return_tensors="pt", 
@@ -26,9 +30,40 @@ class LLMService:
             num_beams=2, 
             early_stopping=True,
             temperature=0.3,
-            do_sample=True
+            do_sample=True,
+            max_time=60.0 # Enforce 60s timeout at generation level (HuggingFace feature)
         )
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+    def stream_inference(self, prompt: str, max_length: int = 256):
+        """
+        Generator that yields tokens as they are generated.
+        """
+        input_ids = self.tokenizer(
+            prompt, 
+            return_tensors="pt", 
+            max_length=512, 
+            truncation=True
+        ).input_ids
+
+        streamer = TextIteratorStreamer(self.tokenizer, skip_special_tokens=True)
+        
+        generation_kwargs = dict(
+            input_ids=input_ids,
+            streamer=streamer,
+            max_length=max_length,
+            num_beams=1, # Streaming usually works best with greedy or sampling, beam search generates full sequences
+            do_sample=True,
+            temperature=0.3,
+            max_time=60.0
+        )
+
+        # Run generation in a separate thread so we can yield from the streamer
+        thread = threading.Thread(target=self.model.generate, kwargs=generation_kwargs)
+        thread.start()
+
+        for new_text in streamer:
+            yield new_text
 
     def rewrite_query(self, question: str) -> str:
         """

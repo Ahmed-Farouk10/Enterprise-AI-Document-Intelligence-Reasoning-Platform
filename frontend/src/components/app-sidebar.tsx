@@ -36,6 +36,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     const [currentProgress, setCurrentProgress] = React.useState(0)
     const [uploadError, setUploadError] = React.useState<string | null>(null)
     const [chatSessions, setChatSessions] = React.useState<ChatSession[]>([])
+    const [sessionsLoading, setSessionsLoading] = React.useState(true)
 
     // Fetch chat history
     React.useEffect(() => {
@@ -47,6 +48,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 }
             } catch (err) {
                 console.error("Failed to fetch chat history", err)
+            } finally {
+                setSessionsLoading(false)
             }
         }
         fetchSessions()
@@ -138,7 +141,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     loading={loading}
                     onDelete={handleDelete}
                 />
-                <NavHistory chats={mappedChats} />
+                <NavHistory chats={mappedChats} loading={sessionsLoading} />
                 <NavSystemStatus />
             </SidebarContent>
             <SidebarRail />

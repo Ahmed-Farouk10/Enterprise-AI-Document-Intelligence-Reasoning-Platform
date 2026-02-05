@@ -37,6 +37,9 @@ interface NavDocumentsProps {
     onDelete?: (id: string) => Promise<void>
 }
 
+// Import here to avoid circular dependencies if any
+import { NavItemSkeleton } from "@/components/skeletons"
+
 export function NavDocuments({ documents, loading = false, onDelete }: NavDocumentsProps) {
     const { isMobile } = useSidebar()
 
@@ -51,10 +54,11 @@ export function NavDocuments({ documents, loading = false, onDelete }: NavDocume
             <SidebarGroupLabel>Documents</SidebarGroupLabel>
             <SidebarMenu>
                 {loading ? (
-                    <div className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground">
-                        <Loader2 className="size-3 animate-spin" />
-                        <span>Loading documents...</span>
-                    </div>
+                    <>
+                        <NavItemSkeleton />
+                        <NavItemSkeleton />
+                        <NavItemSkeleton />
+                    </>
                 ) : documents.length > 0 ? (
                     documents.map((item) => (
                         <SidebarMenuItem key={item.id}>

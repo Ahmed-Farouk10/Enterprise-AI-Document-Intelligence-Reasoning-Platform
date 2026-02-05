@@ -1,5 +1,8 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
+WORKDIR /app
+
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-eng \
@@ -7,23 +10,32 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     poppler-utils \
+    build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Create app directory and user for security
 RUN mkdir -p /app && \
-    useradd -m -u 1000 user && \
-    chown -R user:user /app
+    useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
 
-WORKDIR /app
-
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade -r requirements.txt && \
-    chown -R user:user /app
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-USER user
-ENV PATH="/home/user/.local/bin:$PATH"
+# Copy application code
+COPY --chown=appuser:appuser . .
 
-COPY --chown=user . .
+# Create uploads directory
+RUN mkdir -p uploads && chown -R appuser:appuser uploads
 
-EXPOSE 7860
+# Switch to non-root user
+USER appuser
+ENV PATH="/home/appuser/.local/bin:$PATH"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
+# Expose port
+EXPOSE 8000
+
+# Default command (can be overridden in docker-compose)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

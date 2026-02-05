@@ -22,6 +22,7 @@ class DocumentResponse(DocumentBase):
     uploaded_at: datetime
     processed_at: Optional[datetime] = None
     status: str  # uploading, processing, completed, failed
+    version: int
     metadata: Optional[DocumentMetadata] = None
 
     class Config:

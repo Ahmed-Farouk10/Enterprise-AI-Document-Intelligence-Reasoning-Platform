@@ -3,6 +3,7 @@ import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/components/ui/sonner";
+import { QueryProvider } from "@/components/providers/query-provider";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const spaceGrotesk = Space_Grotesk({
@@ -27,7 +28,9 @@ export default function RootLayout({
         spaceGrotesk.variable,
         "min-h-screen bg-background font-sans antialiased"
       )}>
-        {children}
+        <QueryProvider>
+          {children}
+        </QueryProvider>
         <Toaster />
       </body>
     </html>
