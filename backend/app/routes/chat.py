@@ -180,17 +180,9 @@ async def send_message(request: Request, response: Response, session_id: str, me
             )
             
             if retrieved_chunks:
-                # Step 3: Grade relevance (Self-RAG) - RELAXED
-                relevant_chunks = []
-                for chunk in retrieved_chunks:
-                    # Try to grade, but if it fails or is strict, keep the chunk anyway for now
-                    # This ensures we don't get empty responses for valid queries
-                    is_relevant = llm_service.grade_relevance(chunk["text"], message_data.content)
-                    if is_relevant:
-                        chunk["relevance_score"] = 1.0
-                        relevant_chunks.append(chunk)
-                    else:
-                        logger.info(f"Chunk graded irrelevant and dropped: {chunk['doc_name']}")
+                # Trust the vector store's top results (already hybrid graded)
+                # LLM grading is too unstable for small models
+                relevant_chunks = retrieved_chunks
 
                 
                 # Step 4: Generate answer from context
