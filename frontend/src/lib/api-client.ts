@@ -8,7 +8,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
  */
 const axiosInstance: AxiosInstance = axios.create({
     baseURL: API_BASE_URL,
-    timeout: 30000,
+    timeout: 120000, // 2 minutes timeout for slow HF Space processing
     headers: {
         'Content-Type': 'application/json',
     },
