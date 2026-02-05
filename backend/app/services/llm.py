@@ -51,10 +51,11 @@ class LLMService:
         outputs = self.model.generate(
             input_ids, 
             max_length=max_length, 
+            max_length=max_length, 
             num_beams=2, 
             early_stopping=True,
-            temperature=0.3,
-            do_sample=True,
+            repetition_penalty=1.2,
+            do_sample=False,
             max_time=60.0 # Enforce 60s timeout at generation level (HuggingFace feature)
         )
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -77,9 +78,8 @@ class LLMService:
             input_ids=input_ids,
             streamer=streamer,
             max_length=max_length,
-            num_beams=1, # Streaming usually works best with greedy or sampling, beam search generates full sequences
-            do_sample=True,
-            temperature=0.3,
+            do_sample=False, # Use greedy decoding for stability
+            repetition_penalty=1.2, # Prevent loops
             max_time=60.0
         )
 
