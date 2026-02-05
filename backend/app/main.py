@@ -29,12 +29,12 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 # Create database tables on startup
 @app.on_event("startup")
 async def startup_event():
-    logger.info("application_startup", event="waiting_for_database")
+    logger.info("application_startup", status="waiting_for_database")
     wait_for_db()
     
-    logger.info("application_startup", event="creating_database_tables")
+    logger.info("application_startup", status="creating_database_tables")
     Base.metadata.create_all(bind=engine)
-    logger.info("application_startup", event="database_initialized")
+    logger.info("application_startup", status="database_initialized")
 
 # CORS Configuration
 app.add_middleware(

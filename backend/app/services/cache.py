@@ -37,7 +37,12 @@ class CacheService:
             logger.info("redis_cache_initialized", url=redis_url.split('@')[-1])  # Hide password in logs
             
         except Exception as e:
-            logger.warning("redis_cache_unavailable", error=str(e))
+            # If running in cloud (Spaces) without a Redis sidecar, this failure is expected.
+            # We downgrade to INFO to avoid alarming "Configuration Errors" in logs.
+            if "localhost" in redis_url or "127.0.0.1" in redis_url:
+                logger.info("redis_cache_disabled", reason="connection_refused_localhost")
+            else:
+                logger.warning("redis_cache_unavailable", error=str(e))
             self.enabled = False
             self.client = None
     
