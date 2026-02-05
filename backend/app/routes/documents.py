@@ -91,6 +91,7 @@ async def upload_document(request: Request, response: Response, file: UploadFile
             "uploaded_at": document.created_at.isoformat(),
             "processed_at": None,
             "status": "pending",
+            "version": document.version,
             "metadata": {
                 "task_id": task.id,
                 "message": "Document uploaded successfully. Processing in background."
