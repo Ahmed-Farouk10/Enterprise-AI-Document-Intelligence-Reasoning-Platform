@@ -7,11 +7,30 @@ logger = logging.getLogger(__name__)
 
 class LLMService:
     def __init__(self):
-        logger.info("Loading LLM (FLAN-T5-Base)...")
-        self.model_name = "google/flan-t5-base"
-        self.tokenizer = T5Tokenizer.from_pretrained(self.model_name)
-        self.model = T5ForConditionalGeneration.from_pretrained(self.model_name)
-        logger.info("LLM loaded successfully")
+        import os
+        self.model_name = os.getenv("LLM_MODEL", "google/flan-t5-base")
+        logger.info(f"Loading LLM ({self.model_name})...")
+        
+        try:
+            self.tokenizer = T5Tokenizer.from_pretrained(self.model_name, legacy=False)
+            # Optimize loading: 
+            # 1. low_cpu_mem_usage=True reduces RAM usage during load
+            # 2. torch_dtype=auto uses fp16 if available (smaller)
+            self.model = T5ForConditionalGeneration.from_pretrained(
+                self.model_name, 
+                low_cpu_mem_usage=True
+            )
+            logger.info("LLM loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load LLM: {e}")
+            # Fallback to small model if base fails
+            if self.model_name != "google/flan-t5-small":
+                logger.warning("Falling back to flan-t5-small due to memory/load error")
+                self.model_name = "google/flan-t5-small"
+                self.tokenizer = T5Tokenizer.from_pretrained(self.model_name, legacy=False)
+                self.model = T5ForConditionalGeneration.from_pretrained(self.model_name)
+            else:
+                raise e
 
     def _run_inference(self, prompt: str, max_length: int = 64) -> str:
         """Helper to run model generation"""
