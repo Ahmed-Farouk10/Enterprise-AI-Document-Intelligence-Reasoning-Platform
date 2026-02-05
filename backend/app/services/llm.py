@@ -74,8 +74,8 @@ Supported:"""
 
     def generate_answer(self, context: str, question: str) -> str:
         """Standard generation from context"""
-        input_text = f"Answer the question based on the context.\nContext: {context}\nQuestion: {question}\nAnswer:"
-        return self._run_inference(input_text, max_length=128)
+        input_text = f"Context: {context}\n\nQuestion: {question}\n\nTask: Answer the question in detail based on the context provided above. If the context contains multiple relevant points, please summarize them comprehensively.\n\nAnswer:"
+        return self._run_inference(input_text, max_length=256)
 
 # Singleton
 llm_service = LLMService()

@@ -238,7 +238,11 @@ class VectorStore:
         
         # Add scores and sort
         for i, cand in enumerate(candidates):
-            cand["rerank_score"] = float(scores[i])
+            # Sigmoid normalization: 1 / (1 + e^-x)
+            # This converts unbounded logits (e.g. -8 to +8) into 0-1 probability
+            logit = float(scores[i])
+            probability = 1 / (1 + np.exp(-logit))
+            cand["rerank_score"] = probability
         
         # Sort by rerank score and take top-k
         reranked = sorted(candidates, key=lambda x: x["rerank_score"], reverse=True)[:top_k]
