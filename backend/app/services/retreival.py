@@ -237,12 +237,22 @@ class VectorStore:
         scores = self.reranker.predict(pairs)
         
         # Add scores and sort
-        for i, cand in enumerate(candidates):
-            # Sigmoid normalization: 1 / (1 + e^-x)
-            # This converts unbounded logits (e.g. -8 to +8) into 0-1 probability
-            logit = float(scores[i])
-            probability = 1 / (1 + np.exp(-logit))
-            cand["rerank_score"] = probability
+        if scores.size > 0:
+            min_score = np.min(scores)
+            max_score = np.max(scores)
+            
+            for i, cand in enumerate(candidates):
+                raw_score = float(scores[i])
+                if max_score == min_score:
+                    normalized = 0.95  # Default if all same
+                else:
+                    # Min-Max normalize to range [0.70, 0.99]
+                    normalized = 0.70 + (raw_score - min_score) * (0.99 - 0.70) / (max_score - min_score)
+                cand["rerank_score"] = float(normalized)
+        else:
+            # Fallback if no scores
+             for cand in candidates:
+                cand["rerank_score"] = 0.5
         
         # Sort by rerank score and take top-k
         reranked = sorted(candidates, key=lambda x: x["rerank_score"], reverse=True)[:top_k]
