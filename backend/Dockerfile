@@ -2,8 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including Redis
 RUN apt-get update && apt-get install -y \
+    redis-server \
     tesseract-ocr \
     tesseract-ocr-eng \
     libtesseract-dev \
@@ -13,6 +14,8 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
+
+
 
 # Create app directory and user for security
 RUN mkdir -p /app && \
@@ -37,5 +40,7 @@ ENV PATH="/home/appuser/.local/bin:$PATH"
 # Expose port 7860 (Required by HuggingFace Spaces)
 EXPOSE 7860
 
-# Default command
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
+# Default command: Start Redis -> Start Celery Worker -> Start FastAPI
+CMD redis-server --daemonize yes && \
+    celery -A app.workers.celery_app worker --loglevel=info --concurrency=1 -D && \
+    uvicorn "app.main:app" --host "0.0.0.0" --port "7860"
