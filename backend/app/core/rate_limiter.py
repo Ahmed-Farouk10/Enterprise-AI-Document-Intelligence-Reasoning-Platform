@@ -20,6 +20,11 @@ def get_limiter_storage_uri():
     # If using rediss (SSL), ensure compatibility
     if not redis_url.startswith("redis://") and not redis_url.startswith("rediss://"):
         return "memory://"
+    
+    # Fallback to memory if localhost (for Cloud Spaces without sidecar Redis)
+    if "localhost" in redis_url or "127.0.0.1" in redis_url:
+        logger.info("rate_limiter_memory_fallback", reason="localhost_redis_detected")
+        return "memory://"
         
     return redis_url
 
