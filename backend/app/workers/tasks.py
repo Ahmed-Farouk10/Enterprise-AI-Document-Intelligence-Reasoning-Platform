@@ -93,10 +93,10 @@ def process_document_task(self, doc_id: str, file_path: str, mime_type: str, fil
         
         # Add to vector store if text extracted
         if text and len(text.strip()) > 50:
-            # Import Qdrant vector store
-            from app.services.qdrant_store import qdrant_store
+            # Import FAISS vector store (match chat.py)
+            from app.services.retreival import vector_store
             
-            qdrant_store.add_document(
+            vector_store.add_document(
                 text=text,
                 doc_id=doc_id,
                 doc_name=filename

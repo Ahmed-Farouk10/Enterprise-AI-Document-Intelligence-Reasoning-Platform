@@ -70,16 +70,16 @@ async def upload_document(request: Request, response: Response, file: UploadFile
         db.commit()
         db.refresh(document)
         
-        # Dispatch async processing task
-        task = process_document_task.delay(
-            doc_id=document.id,
-            file_path=unique_filename,
-            mime_type=file.content_type,
-            filename=file.filename
-        )
+        # Dispatch processing task (Inline for immediate availability)
+        # Note: Using .apply() runs it synchronously in the same thread
+        task = process_document_task.apply(kwargs={
+            "doc_id": document.id,
+            "file_path": unique_filename,
+            "mime_type": file.content_type,
+            "filename": file.filename
+        })
         
-        logger.info("document_upload_queued", doc_id=document.id, filename=file.filename, 
-                   task_id=task.id, file_size=file_size)
+        logger.info("document_processed_inline", doc_id=document.id, filename=file.filename)
         
         # Return immediately with pending status
         return {
