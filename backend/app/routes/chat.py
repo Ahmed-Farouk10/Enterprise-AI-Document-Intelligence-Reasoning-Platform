@@ -170,7 +170,8 @@ async def send_message(request: Request, response: Response, session_id: str, me
             if LLM_AVAILABLE and len(vector_store.chunks) > 0:
                 logger.info("rag_pipeline_started", session_id=session_id, question=message_data.content)
             
-                rewritten_query = llm_service.rewrite_query(message_data.content)
+                # Skip rewriting to preserve exact user intent
+                rewritten_query = message_data.content
                 
                 # Step 2: Hybrid retrieval with reranking
                 retrieved_chunks = vector_store.retrieve_with_citations(

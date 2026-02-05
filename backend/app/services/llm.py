@@ -51,11 +51,12 @@ class LLMService:
         outputs = self.model.generate(
             input_ids, 
             max_length=max_length, 
-            num_beams=2, 
-            early_stopping=True,
-            repetition_penalty=1.2,
-            do_sample=False,
-            max_time=60.0 # Enforce 60s timeout at generation level (HuggingFace feature)
+            num_beams=1, 
+            do_sample=True,
+            temperature=0.5,
+            top_p=0.9,
+            repetition_penalty=1.0, # Disable penalty to allow bullet points
+            max_time=60.0
         )
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
@@ -77,8 +78,10 @@ class LLMService:
             input_ids=input_ids,
             streamer=streamer,
             max_length=max_length,
-            do_sample=False, # Use greedy decoding for stability
-            repetition_penalty=1.2, # Prevent loops
+            do_sample=True,
+            temperature=0.5,
+            top_p=0.9,
+            repetition_penalty=1.0, 
             max_time=60.0
         )
 
