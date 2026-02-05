@@ -2,6 +2,7 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 pydantic==2.5.0
+tenacity==8.2.3
 
 # Document processing
 pytesseract==0.3.10
@@ -25,6 +26,3 @@ accelerate==0.24.0
 
 # Utilities
 numpy==1.24.3
-
-torch==2.1.0
-transformers==4.35.0

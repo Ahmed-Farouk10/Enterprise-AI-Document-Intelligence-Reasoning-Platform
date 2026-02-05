@@ -15,7 +15,10 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 @router.post("/upload", response_model=DocumentResponse)
 async def upload_document(file: UploadFile = File(...)):
-    """Upload a document"""
+    """Upload a document and process it for RAG"""
+    import logging
+    import uuid
+    logger = logging.getLogger(__name__)
     
     # Validate file type
     allowed_types = ["application/pdf", "text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
@@ -23,7 +26,6 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="File type not supported. Only PDF, TXT, and DOCX are allowed.")
     
     # Generate unique filename
-    import uuid
     file_extension = Path(file.filename).suffix
     file_stem = Path(file.filename).stem
     unique_filename = f"{uuid.uuid4().hex[:8]}_{file_stem}{file_extension}"
@@ -36,13 +38,65 @@ async def upload_document(file: UploadFile = File(...)):
         
         file_size = os.path.getsize(file_path)
         
-        # Create document record
+        # Create document record with processing status
         document = Database.create_document(
             filename=unique_filename,
             original_name=file.filename,
             file_size=file_size,
             mime_type=file.content_type
         )
+        
+        # Process document asynchronously (extract text and add to vector store)
+        try:
+            from app.services.retreival import vector_store
+            
+            # Extract text based on file type
+            if file.content_type == "text/plain":
+                # Plain text
+                with open(file_path, "r", encoding="utf-8") as f:
+                    text = f.read()
+            elif file.content_type == "application/pdf":
+                # PDF extraction
+                try:
+                    import pdfplumber
+                    with pdfplumber.open(file_path) as pdf:
+                        text = "\n\n".join([page.extract_text() or "" for page in pdf.pages])
+                        document["metadata"]["page_count"] = len(pdf.pages)
+                except Exception as e:
+                    logger.error(f"PDF extraction failed: {e}")
+                    text = ""
+            elif "wordprocessingml" in file.content_type:
+                # DOCX extraction
+                try:
+                    from docx import Document as DocxDocument
+                    doc = DocxDocument(file_path)
+                    text = "\n\n".join([para.text for para in doc.paragraphs])
+                except Exception as e:
+                    logger.error(f"DOCX extraction failed: {e}")
+                    text = ""
+            else:
+                text = ""
+            
+            # Add to vector store if text extracted
+            if text and len(text.strip()) > 50:
+                vector_store.add_document(
+                    text=text,
+                    doc_id=document["id"],
+                    doc_name=file.filename
+                )
+                document["metadata"]["extracted_text"] = text[:500] + "..." if len(text) > 500 else text
+                document["metadata"]["vector_store_id"] = document["id"]
+                document["status"] = "completed"
+                logger.info(f"Document {file.filename} processed and added to vector store")
+            else:
+                document["status"] = "failed"
+                document["metadata"]["error"] = "Could not extract text from document"
+                logger.warning(f"No text extracted from {file.filename}")
+                
+        except Exception as e:
+            logger.error(f"Document processing error: {e}", exc_info=True)
+            document["status"] = "failed"
+            document["metadata"]["error"] = str(e)
         
         return document
     
