@@ -5,13 +5,12 @@ import logging
 from typing import List, Dict, Tuple
 import uuid
 from rank_bm25 import BM25Okapi
+import pickle
+import os
 
 logger = logging.getLogger(__name__)
 
 class VectorStore:
-import pickle
-import os
-
     def __init__(self):
         logger.info("Initializing Advanced Vector Store (Hybrid Search + Re-Ranking)...")
         self.model = SentenceTransformer('all-MiniLM-L6-v2')  # 80MB, fast
