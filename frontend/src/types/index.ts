@@ -38,10 +38,10 @@ export interface ChatMessage {
 export interface ChatSession {
     id: string
     title: string
-    createdAt: string
-    updatedAt: string
+    created_at: string
+    updated_at: string
     messages: ChatMessage[]
-    documentIds: string[]
+    document_ids: string[]
 }
 
 /**

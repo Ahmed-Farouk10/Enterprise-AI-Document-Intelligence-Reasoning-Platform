@@ -15,6 +15,9 @@ import {
 import { useDocuments } from '@/hooks/use-documents'
 import { useToast } from '@/hooks/use-toast'
 
+import { ChatAPI } from '@/lib/api/chat'
+import { ChatSession } from '@/types'
+
 const data = {
     teams: [
         {
@@ -23,18 +26,7 @@ const data = {
             plan: 'Enterprise',
         },
     ],
-    chats: [
-        {
-            name: 'Q&A about Contract.pdf',
-            url: '#',
-            date: '2 hours ago',
-        },
-        {
-            name: 'Research Summary',
-            url: '#',
-            date: 'Yesterday',
-        },
-    ],
+    // Removed mock chats
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -43,6 +35,26 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     const [isUploading, setIsUploading] = React.useState(false)
     const [currentProgress, setCurrentProgress] = React.useState(0)
     const [uploadError, setUploadError] = React.useState<string | null>(null)
+    const [chatSessions, setChatSessions] = React.useState<ChatSession[]>([])
+
+    // Fetch chat history
+    React.useEffect(() => {
+        const fetchSessions = async () => {
+            try {
+                const response = await ChatAPI.getSessions()
+                if (response.success && response.data) {
+                    setChatSessions(response.data)
+                }
+            } catch (err) {
+                console.error("Failed to fetch chat history", err)
+            }
+        }
+        fetchSessions()
+
+        // Poll for updates every 10 seconds (temporary fix for real-time)
+        const interval = setInterval(fetchSessions, 10000)
+        return () => clearInterval(interval)
+    }, [])
 
     const handleUpload = async (file: File) => {
         setIsUploading(true)
@@ -94,6 +106,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         date: new Date(doc.uploadedAt).toLocaleDateString(),
     }))
 
+    // Map chat sessions for NavHistory
+    const mappedChats = chatSessions.map(session => ({
+        name: session.title || 'New Chat',
+        url: '#', // TODO: Add routing to specific chat
+        date: new Date(session.updated_at || session.created_at).toLocaleDateString()
+    }))
+
     // Track upload progress
     React.useEffect(() => {
         if (Object.keys(uploadProgress).length > 0) {
@@ -119,7 +138,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     loading={loading}
                     onDelete={handleDelete}
                 />
-                <NavHistory chats={data.chats} />
+                <NavHistory chats={mappedChats} />
                 <NavSystemStatus />
             </SidebarContent>
             <SidebarRail />
