@@ -176,7 +176,7 @@ async def send_message(request: Request, response: Response, session_id: str, me
                 # Step 2: Hybrid retrieval with reranking
                 retrieved_chunks = vector_store.retrieve_with_citations(
                     rewritten_query, 
-                    k=5, # Increased context for better reasoning
+                    k=3, # Fit within T5 512 token limit
                     use_hybrid=True,
                     use_reranking=True
                 )
