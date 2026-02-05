@@ -25,7 +25,8 @@ class LLMService:
             max_length=max_length, 
             num_beams=2, 
             early_stopping=True,
-            temperature=0.3
+            temperature=0.3,
+            do_sample=True
         )
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
