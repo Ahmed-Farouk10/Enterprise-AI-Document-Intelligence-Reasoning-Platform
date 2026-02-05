@@ -34,8 +34,8 @@ RUN mkdir -p uploads && chown -R appuser:appuser uploads
 USER appuser
 ENV PATH="/home/appuser/.local/bin:$PATH"
 
-# Expose port
-EXPOSE 8000
+# Expose port 7860 (Required by HuggingFace Spaces)
+EXPOSE 7860
 
-# Default command (can be overridden in docker-compose)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default command
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
