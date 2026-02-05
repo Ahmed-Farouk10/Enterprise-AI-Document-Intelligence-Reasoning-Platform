@@ -258,6 +258,8 @@ import os
         
         # Stage 1: Broad retrieval
         if use_hybrid:
+            # Sync with disk to ensure we have latest documents (crucial for multi-worker setups)
+            self.load_index()
             candidates = self.hybrid_search(query, k=20)
         else:
             # Fallback to pure semantic
