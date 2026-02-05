@@ -190,14 +190,8 @@ async def send_message(request: Request, response: Response, session_id: str, me
                         chunk["relevance_score"] = 1.0
                         relevant_chunks.append(chunk)
                     else:
-                        # Keep it but mark as potentially less relevant
-                        logger.info(f"Chunk graded irrelevant but keeping as fallback: {chunk['doc_name']}")
-                        chunk["relevance_score"] = 0.5
-                        relevant_chunks.append(chunk)
+                        logger.info(f"Chunk graded irrelevant and dropped: {chunk['doc_name']}")
 
-                # Prioritize high relevance if we have many
-                if len([c for c in relevant_chunks if c.get("relevance_score", 0) > 0.8]) > 0:
-                    relevant_chunks = [c for c in relevant_chunks if c.get("relevance_score", 0) > 0.8]
                 
                 # Step 4: Generate answer from context
                 if relevant_chunks:
