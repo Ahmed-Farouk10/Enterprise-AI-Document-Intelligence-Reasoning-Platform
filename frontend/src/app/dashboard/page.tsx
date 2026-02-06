@@ -117,18 +117,19 @@ export default function Page() {
                                                     : 'bg-muted'
                                             )}
                                         >
-                                            <div className="text-sm whitespace-pre-wrap">
-                                                {message.content.split(/(_[^_]+_)/g).map((part, i) => {
-                                                    if (part.startsWith('_') && part.endsWith('_')) {
-                                                        return (
-                                                            <span key={i} className="block text-muted-foreground italic mb-2 border-l-2 border-muted-foreground/20 pl-2 animate-pulse">
-                                                                {part.slice(1, -1)}
-                                                            </span>
-                                                        )
-                                                    }
-                                                    return <span key={i}>{part}</span>
-                                                })}
-                                            </div>
+                                            {/* Reasoning Steps (Professional UI) */}
+                                            {message.reasoning && message.reasoning.length > 0 && (
+                                                <div className="mb-3 space-y-1.5 border-b border-black/5 pb-2 dark:border-white/5">
+                                                    {message.reasoning.map((step, i) => (
+                                                        <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground/80">
+                                                            <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/40 animate-pulse" />
+                                                            <span>{step}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                                             <p className="mt-1 text-[10px] opacity-60">
                                                 {new Date(message.timestamp).toLocaleTimeString()}
                                             </p>

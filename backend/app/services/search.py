@@ -3,7 +3,10 @@ import logging
 from typing import List, Optional
 from pydantic import BaseModel
 from tavily import TavilyClient
-from duckduckgo_search import DDGS
+try:
+    from duckduckgo_search import DDGS
+except ImportError:
+    from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 

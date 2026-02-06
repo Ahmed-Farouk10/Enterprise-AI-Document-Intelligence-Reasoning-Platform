@@ -25,6 +25,7 @@ export interface ChatMessage {
     role: 'user' | 'assistant' | 'system'
     content: string
     timestamp: string
+    reasoning?: string[]
     documentContext?: {
         documentId: string
         documentName: string

@@ -86,6 +86,7 @@ export function useChat(options: UseChatOptions = {}) {
                 id: assistantMessageId,
                 role: 'assistant',
                 content: '',
+                reasoning: [], // Initialize reasoning array
                 timestamp: new Date().toISOString(),
             }
 
@@ -133,13 +134,12 @@ export function useChat(options: UseChatOptions = {}) {
                                 const newMessages = [...prev];
                                 const lastMsg = newMessages[newMessages.length - 1];
                                 if (lastMsg.id === assistantMessageId) {
-                                    // Append status in italics - Immutable Update
-                                    const prefix = lastMsg.content ? '\n' : '';
-                                    const updatedContent = lastMsg.content + `${prefix}_${chunk.content}_`;
+                                    // Update Reasoning - Immutable Update
+                                    const newReasoning = [...(lastMsg.reasoning || []), chunk.content];
 
                                     newMessages[newMessages.length - 1] = {
                                         ...lastMsg,
-                                        content: updatedContent
+                                        reasoning: newReasoning
                                     };
                                 }
                                 return newMessages;
