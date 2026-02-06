@@ -58,15 +58,16 @@ class LLMService:
             add_generation_prompt=True
         )
         
-        input_ids = self.tokenizer(
+        inputs = self.tokenizer(
             text, 
             return_tensors="pt", 
             truncation=True,
             max_length=4096 # Large context for Qwen
-        ).input_ids
+        )
         
         outputs = self.model.generate(
-            input_ids, 
+            inputs.input_ids, 
+            attention_mask=inputs.attention_mask,
             max_new_tokens=max_new_tokens,
             do_sample=True,
             temperature=temperature,
@@ -84,11 +85,19 @@ class LLMService:
         """
         self._ensure_model_loaded()
         
-        # Build messages for Chat Template
-        messages = [
-            {"role": "system", "content": "You are Qwen, a helpful and precise document assistant. Answer the user's question based ONLY on the provided context. If the answer is not in the context, say 'I cannot find the answer'."},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{message}"}
-        ]
+        if not context or len(context.strip()) < 10:
+            # Fallback to General Knowledge
+            logger.info("Context empty. Using General Knowledge System Prompt.")
+            messages = [
+                {"role": "system", "content": "You are Qwen, a helpful assistant. The user's question could not be answered by local documents or web search. Answer the question to the best of your ability using your general knowledge. Start your answer by saying 'I couldn't find specific documents, but generally speaking...'"},
+                {"role": "user", "content": f"Question:\n{message}"}
+            ]
+        else:
+            # Standard RAG
+            messages = [
+                {"role": "system", "content": "You are Qwen, a helpful and precise document assistant. Answer the user's question based ONLY on the provided context. If the answer is not in the context, say 'I cannot find the answer'."},
+                {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{message}"}
+            ]
 
         text = self.tokenizer.apply_chat_template(
             messages, 
@@ -96,17 +105,18 @@ class LLMService:
             add_generation_prompt=True
         )
 
-        input_ids = self.tokenizer(
+        inputs = self.tokenizer(
             text, 
             return_tensors="pt", 
             truncation=True,
             max_length=8192 # Support larger docs
-        ).input_ids
+        )
 
         streamer = TextIteratorStreamer(self.tokenizer, skip_special_tokens=True, skip_prompt=True)
         
         generation_kwargs = dict(
-            input_ids=input_ids,
+            input_ids=inputs.input_ids,
+            attention_mask=inputs.attention_mask,
             streamer=streamer,
             max_new_tokens=1024,
             do_sample=True,

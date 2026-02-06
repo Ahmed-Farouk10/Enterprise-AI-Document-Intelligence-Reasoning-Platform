@@ -20,6 +20,7 @@ from app.core.rate_limiter import limiter
 try:
     from app.services.llm import llm_service
     from app.services.retreival import vector_store
+    from app.services.search import search_service
     LLM_AVAILABLE = True
     LLM_INIT_ERROR = None
 except Exception as e:
@@ -309,11 +310,61 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                     yield f"data: {json.dumps({'type': 'status', 'content': 'Reading context...'})}\n\n"
                     
                     document_context = {
-                        "document_id": retrieved_chunks[0]["doc_id"],
                         "document_name": retrieved_chunks[0]["doc_name"],
                         "relevant_chunks": [c["text"][:200] + "..." for c in retrieved_chunks]
                     }
             
+            # --- AGENTIC REASONING LAYER ---
+            yield f"data: {json.dumps({'type': 'status', 'content': 'Analyzing query intent...'})}\n\n"
+            
+            # 1. Evaluate Local Context Quality
+            should_search = False
+            search_reason = ""
+            
+            if not retrieved_chunks:
+                should_search = True
+                search_reason = "No relevant local documents found."
+            else:
+                # Check confidence of top result
+                top_score = retrieved_chunks[0].get("similarity_score", 0.0)
+                if top_score < 0.65:
+                    should_search = True
+                    search_reason = f"Low confidence match ({top_score:.2f}) - Context might be missing."
+                
+                # Check for "External" keywords implies user WANTS outside info (e.g. "market rates", "latest news")
+                # This overrides even good local matches if the intent is clearly external
+                external_keywords = ["market", "global", "benchmark", "score", "average", "news", "trend", "ats"]
+                if any(k in message_data.content.lower() for k in external_keywords):
+                    should_search = True
+                    search_reason = "Query implies need for external benchmarks/data."
+
+            # 2. Execute Search if Needed
+            search_context = ""
+            if should_search:
+                 yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: {search_reason} Searching web...'})}\n\n"
+                 
+                 try:
+                     search_results = search_service.search(message_data.content, num_results=4)
+                     
+                     if search_results:
+                         yield f"data: {json.dumps({'type': 'status', 'content': f'Found {len(search_results)} credible results. Verifying...'})}\n\n"
+                         
+                         # Format search results
+                         search_context = "\n\n".join([
+                             f"[External Source: {r.title} ({r.source_type})] {r.snippet} (Link: {r.link})"
+                             for r in search_results
+                         ])
+                         
+                         # Append to context
+                         context = f"{context}\n\n=== EXTERNAL CREDIBLE SOURCES ===\n{search_context}"
+                     else:
+                         yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: Web search yielded no results. Falling back to general knowledge.'})}\n\n"
+                 except Exception as exc:
+                     logger.error(f"Search failed: {exc}")
+                     yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: Search API unavailable. Proceeding with best effort.'})}\n\n"
+            else:
+                 yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: Local documents provided sufficient context.'})}\n\n"
+
             # Streaming Generation
             yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
             

@@ -81,6 +81,9 @@ services:
       
       # HuggingFace
       HF_TOKEN: ${HF_TOKEN:-}
+      
+      # Agentic Search
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
     ports:
       - "8000:8000"
     volumes:
@@ -121,6 +124,9 @@ services:
       
       # HuggingFace
       HF_TOKEN: ${HF_TOKEN:-}
+      
+      # Agentic Search
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads

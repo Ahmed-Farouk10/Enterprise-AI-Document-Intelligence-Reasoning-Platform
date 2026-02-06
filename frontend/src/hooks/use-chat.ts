@@ -128,6 +128,17 @@ export function useChat(options: UseChatOptions = {}) {
                                 return newMessages;
                             });
                             setIsTyping(false);
+                        } else if (chunk.type === 'status') {
+                            setMessages((prev) => {
+                                const newMessages = [...prev];
+                                const lastMsg = newMessages[newMessages.length - 1];
+                                if (lastMsg.id === assistantMessageId) {
+                                    // Append status in italics
+                                    const prefix = lastMsg.content ? '\n' : '';
+                                    lastMsg.content += `${prefix}_${chunk.content}_`;
+                                }
+                                return newMessages;
+                            });
                         } else if (chunk.type === 'error') {
                             setError(chunk.content);
                             setIsTyping(false);
