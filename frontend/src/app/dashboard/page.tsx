@@ -117,7 +117,18 @@ export default function Page() {
                                                     : 'bg-muted'
                                             )}
                                         >
-                                            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                                            <div className="text-sm whitespace-pre-wrap">
+                                                {message.content.split(/(_[^_]+_)/g).map((part, i) => {
+                                                    if (part.startsWith('_') && part.endsWith('_')) {
+                                                        return (
+                                                            <span key={i} className="block text-muted-foreground italic mb-2 border-l-2 border-muted-foreground/20 pl-2 animate-pulse">
+                                                                {part.slice(1, -1)}
+                                                            </span>
+                                                        )
+                                                    }
+                                                    return <span key={i}>{part}</span>
+                                                })}
+                                            </div>
                                             <p className="mt-1 text-[10px] opacity-60">
                                                 {new Date(message.timestamp).toLocaleTimeString()}
                                             </p>

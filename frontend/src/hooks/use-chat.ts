@@ -133,9 +133,14 @@ export function useChat(options: UseChatOptions = {}) {
                                 const newMessages = [...prev];
                                 const lastMsg = newMessages[newMessages.length - 1];
                                 if (lastMsg.id === assistantMessageId) {
-                                    // Append status in italics
+                                    // Append status in italics - Immutable Update
                                     const prefix = lastMsg.content ? '\n' : '';
-                                    lastMsg.content += `${prefix}_${chunk.content}_`;
+                                    const updatedContent = lastMsg.content + `${prefix}_${chunk.content}_`;
+
+                                    newMessages[newMessages.length - 1] = {
+                                        ...lastMsg,
+                                        content: updatedContent
+                                    };
                                 }
                                 return newMessages;
                             });
