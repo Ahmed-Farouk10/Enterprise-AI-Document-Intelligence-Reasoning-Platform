@@ -290,7 +290,6 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
         logger.warning(f"Failed to fetch history: {e}")
 
     user_message = DatabaseService.create_message(
-    user_message = DatabaseService.create_message(
         db=db,
         session_id=session_id,
         role="user",
