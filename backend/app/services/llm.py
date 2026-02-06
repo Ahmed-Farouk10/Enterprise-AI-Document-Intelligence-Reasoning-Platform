@@ -158,7 +158,11 @@ class LLMService:
     def generate_answer(self, context: str, question: str) -> str:
         """Standard generation"""
         messages = [
-            {"role": "system", "content": "You are a helpful assistant. Answer the user's question based ONLY on the provided documents. Use detailed bullet points where appropriate."},
+            {"role": "system", "content": "You are a senior document analyst. "
+             "Analyze the provided context holistically. "
+             "When evaluating timelines (work history, education), pay close attention to overlapping dates. "
+             "Do not assume gaps exist if education or other activities cover the period. "
+             "Answer in detailed bullet points."},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{question}"}
         ]
         return self._run_inference(messages, max_new_tokens=1024)

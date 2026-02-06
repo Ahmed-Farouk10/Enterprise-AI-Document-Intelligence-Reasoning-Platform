@@ -176,7 +176,7 @@ async def send_message(request: Request, response: Response, session_id: str, me
                 # Step 2: Hybrid retrieval with reranking
                 retrieved_chunks = vector_store.retrieve_with_citations(
                     rewritten_query, 
-                    k=3, # Fit within T5 512 token limit
+                    k=10, # Increased for Qwen 32k context window 
                     use_hybrid=True,
                     use_reranking=True
                 )
@@ -315,10 +315,9 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                     }
             
             # Streaming Generation
-            prompt = f"Context: {context}\n\nQuestion: {message_data.content}\n\nAnswer:"
             yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
             
-            for token in llm_service.stream_inference(prompt):
+            for token in llm_service.stream_inference(message_data.content, context):
                 full_response += token
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
                 
