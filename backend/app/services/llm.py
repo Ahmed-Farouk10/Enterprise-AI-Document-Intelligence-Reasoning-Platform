@@ -36,7 +36,16 @@ class LLMService:
 
     def _ensure_model_loaded(self):
         if self.model is None:
+            logger.info(f"Model not loaded. Loading now... (PID: {os.getpid()})")
             self.load_model()
+        else:
+            logger.debug(f"Model already loaded (PID: {os.getpid()})")
+
+    def warmup(self):
+        """Warmup the model by loading it into memory"""
+        logger.info("Warming up LLM Service...")
+        self._ensure_model_loaded()
+        logger.info("LLM Service ready.")
 
     def _run_inference(self, messages: list, max_new_tokens: int = 512, temperature: float = 0.4) -> str:
         """Helper to run model generation using chat templates"""

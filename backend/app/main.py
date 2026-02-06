@@ -36,6 +36,10 @@ async def startup_event():
     Base.metadata.create_all(bind=engine)
     logger.info("application_startup", status="database_initialized")
 
+    # Warmup LLM Service (Load Model into Memory)
+    from app.services.llm import llm_service
+    llm_service.warmup()
+
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
