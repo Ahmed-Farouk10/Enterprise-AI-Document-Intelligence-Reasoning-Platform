@@ -27,8 +27,7 @@ class LLMService:
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name, 
                 dtype=torch.float32, 
-                low_cpu_mem_usage=True,
-                trust_remote_code=True
+                low_cpu_mem_usage=True
             )
             logger.info("LLM loaded successfully")
         except Exception as e:
