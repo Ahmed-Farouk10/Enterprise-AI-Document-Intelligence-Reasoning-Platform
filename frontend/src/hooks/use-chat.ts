@@ -139,6 +139,7 @@ export function useChat(options: UseChatOptions = {}) {
                                 }
                                 return newMessages;
                             });
+                            setIsTyping(false);
                         } else if (chunk.type === 'error') {
                             setError(chunk.content);
                             setIsTyping(false);
