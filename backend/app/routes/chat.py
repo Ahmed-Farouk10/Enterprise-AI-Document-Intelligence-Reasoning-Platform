@@ -346,7 +346,9 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                  
                  # Generate Smart Query
                  smart_query = llm_service.generate_search_query(message_data.content, context)
-                 yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: Searching web for \"{smart_query}\"...'})}\n\n"
+                 # Fix: Avoid backslash in f-string expression for Python < 3.12
+                 msg = f"Thinking: Searching web for '{smart_query}'..."
+                 yield f"data: {json.dumps({'type': 'status', 'content': msg})}\n\n"
                  
                  try:
                      search_results = search_service.search(smart_query, num_results=5)
