@@ -299,8 +299,9 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
 
             if len(vector_store.chunks) > 0:
                 # Rewrite query
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: analyzing query intent...'})}\n\n"
                 rewritten_query = llm_service.rewrite_query(message_data.content)
-                yield f"data: {json.dumps({'type': 'status', 'content': 'Searching documents...'})}\n\n"
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: searching local knowledge base...'})}\n\n"
                 
                 # Retrieve
                 retrieved_chunks = vector_store.retrieve_with_citations(rewritten_query, k=3)
@@ -315,7 +316,7 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                     }
             
             # --- AGENTIC REASONING LAYER ---
-            yield f"data: {json.dumps({'type': 'status', 'content': 'Analyzing query intent...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: verifying context sufficiency...'})}\n\n"
             
             # 1. Evaluate Local Context Quality
             should_search = False

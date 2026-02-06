@@ -77,7 +77,7 @@ class LLMService:
         )
         
         # Decode only the new tokens
-        return self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
+        return self.tokenizer.decode(outputs[0][len(inputs.input_ids[0]):], skip_special_tokens=True)
 
     def stream_inference(self, message: str, context: str = ""):
         """
