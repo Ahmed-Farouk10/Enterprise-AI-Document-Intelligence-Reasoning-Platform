@@ -29,11 +29,11 @@ export function NavHistorySkeleton() {
 
 export function BotMessageSkeleton() {
     return (
-        <div className="flex gap-3 justify-start w-full">
-            <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-3 space-y-2">
-                <Skeleton className="h-4 w-full bg-foreground/10" />
-                <Skeleton className="h-4 w-[90%] bg-foreground/10" />
-                <Skeleton className="h-4 w-[40%] bg-foreground/10" />
+        <div className="flex gap-3 justify-start w-full animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="rounded-2xl bg-muted px-4 py-3 flex items-center gap-1">
+                <div className="h-2 w-2 rounded-full bg-foreground/40 animate-bounce [animation-delay:-0.3s]" />
+                <div className="h-2 w-2 rounded-full bg-foreground/40 animate-bounce [animation-delay:-0.15s]" />
+                <div className="h-2 w-2 rounded-full bg-foreground/40 animate-bounce" />
             </div>
         </div>
     )
