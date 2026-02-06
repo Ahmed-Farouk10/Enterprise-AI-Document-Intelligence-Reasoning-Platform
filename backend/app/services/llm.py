@@ -79,57 +79,148 @@ class LLMService:
         # Decode only the new tokens
         return self.tokenizer.decode(outputs[0][len(inputs.input_ids[0]):], skip_special_tokens=True)
 
-    def stream_inference(self, message: str, context: str = ""):
+    def generate_search_query(self, user_query: str, context: str = "") -> str:
         """
-        Generator for streaming response
+        Generate a precise, keyword-optimized web search query.
+        Output is GUARANTEED to be a single clean query string.
         """
         self._ensure_model_loaded()
-        
-        if not context or len(context.strip()) < 10:
-            # Fallback to General Knowledge
-            logger.info("Context empty. Using General Knowledge System Prompt.")
-            messages = [
-                {"role": "system", "content": "You are Qwen, a helpful assistant. The user's question could not be answered by local documents or web search. Answer the question to the best of your ability using your general knowledge. Start your answer by saying 'I couldn't find specific documents, but generally speaking...'"},
-                {"role": "user", "content": f"Question:\n{message}"}
-            ]
-        else:
-            # Standard RAG
-            messages = [
-                {"role": "system", "content": "You are Qwen, a helpful and precise document assistant. Answer the user's question based ONLY on the provided context. If the answer is not in the context, say 'I cannot find the answer'."},
-                {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{message}"}
-            ]
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an enterprise-grade search query generator.\\n"
+                    "Your output feeds directly into an automated search engine.\\n\\n"
+                    "RULES:\\n"
+                    "- Output ONE single-line search query\\n"
+                    "- NO explanations\\n"
+                    "- NO prefixes or labels\\n"
+                    "- NO punctuation except hyphens\\n"
+                    "- Focus on standards benchmarks definitions\\n"
+                    "- Use professional technical keywords only"
+                )
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"User Question: {user_query}\\n"
+                    f"Domain Context: {context[:200]}"
+                )
+            }
+        ]
 
         text = self.tokenizer.apply_chat_template(
-            messages, 
-            tokenize=False, 
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+
+        inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=2048)
+
+        outputs = self.model.generate(
+            **inputs,
+            max_new_tokens=24,
+            do_sample=False,          # ← Deterministic for search
+            temperature=0.0,
+            repetition_penalty=1.05
+        )
+
+        raw_query = self.tokenizer.decode(
+            outputs[0][len(inputs.input_ids[0]):],
+            skip_special_tokens=True
+        )
+
+        # Final hard sanitation layer (never trust the model blindly)
+        query = (
+            raw_query
+            .replace("\\n", " ")
+            .replace('"', "")
+            .strip()
+            .lower()
+        )
+
+        logger.info(f"Search Query Generated: {query}")
+        return query
+
+    def stream_inference(self, message: str, context: str = ""):
+        """
+        Enterprise-grade streaming response with lifecycle signaling
+        and strict reasoning discipline.
+        """
+        self._ensure_model_loaded()
+
+        if not context or len(context.strip()) < 10:
+            system_prompt = (
+                "You are an expert AI assistant.\\n"
+                "No internal documents were found.\\n"
+                "Answer confidently using general professional knowledge.\\n"
+                "Clearly indicate when reasoning is based on general knowledge."
+            )
+            user_prompt = f"Question:\\n{message}"
+        else:
+            system_prompt = (
+                "You are an Enterprise AI Document Intelligence Analyst.\\n\\n"
+                "DOCUMENT RULES:\\n"
+                "- Local documents are ground truth\\n"
+                "- External knowledge is for benchmarks only\\n"
+                "- Never mix the two implicitly\\n"
+                "- Explicitly state when information is missing\\n"
+                "- Maintain professional, confident tone"
+            )
+            user_prompt = f"Context:\\n{context}\\n\\nQuestion:\\n{message}"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
             add_generation_prompt=True
         )
 
         inputs = self.tokenizer(
-            text, 
-            return_tensors="pt", 
+            text,
+            return_tensors="pt",
             truncation=True,
-            max_length=8192 # Support larger docs
+            max_length=8192
         )
 
-        streamer = TextIteratorStreamer(self.tokenizer, skip_special_tokens=True, skip_prompt=True)
-        
+        streamer = TextIteratorStreamer(
+            self.tokenizer,
+            skip_special_tokens=True,
+            skip_prompt=True
+        )
+
         generation_kwargs = dict(
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
             streamer=streamer,
             max_new_tokens=1024,
             do_sample=True,
-            temperature=0.4,
+            temperature=0.25,         # ← lower for factual streaming
             repetition_penalty=1.1,
             max_time=120.0
         )
 
-        thread = threading.Thread(target=self.model.generate, kwargs=generation_kwargs)
+        def _generate():
+            try:
+                self.model.generate(**generation_kwargs)
+            except Exception as e:
+                logger.error(f"Streaming generation failed: {e}")
+
+        thread = threading.Thread(target=_generate, daemon=True)
         thread.start()
 
-        for new_text in streamer:
-            yield new_text
+        # Stream lifecycle signaling (frontend gold)
+        yield "[STREAM_START]\\n"
+
+        for token in streamer:
+            yield token
+
+        yield "\\n[STREAM_END]"
 
     def rewrite_query(self, question: str) -> str:
         """

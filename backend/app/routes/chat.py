@@ -342,10 +342,14 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
             # 2. Execute Search if Needed
             search_context = ""
             if should_search:
-                 yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: {search_reason} Searching web...'})}\n\n"
+                 yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: {search_reason} Optimizing search query...'})}\n\n"
+                 
+                 # Generate Smart Query
+                 smart_query = llm_service.generate_search_query(message_data.content, context)
+                 yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: Searching web for \"{smart_query}\"...'})}\n\n"
                  
                  try:
-                     search_results = search_service.search(message_data.content, num_results=4)
+                     search_results = search_service.search(smart_query, num_results=5)
                      
                      if search_results:
                          yield f"data: {json.dumps({'type': 'status', 'content': f'Found {len(search_results)} credible results. Verifying...'})}\n\n"
@@ -370,6 +374,13 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
             yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
             
             for token in llm_service.stream_inference(message_data.content, context):
+                # Filter lifecycle markers
+                if "[STREAM_START]" in token:
+                     yield f"data: {json.dumps({'type': 'status', 'content': 'Generating response...'})}\n\n"
+                     continue
+                if "[STREAM_END]" in token:
+                     break
+                     
                 full_response += token
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
                 

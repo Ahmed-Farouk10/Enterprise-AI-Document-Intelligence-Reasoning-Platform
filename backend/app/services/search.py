@@ -48,6 +48,7 @@ class CredibleSearchService:
                 tavily_response = self.tavily_client.search(
                     query=query, 
                     search_depth="advanced", 
+                    topic="general", # Focus on general knowledge/news
                     max_results=num_results
                 )
                 
