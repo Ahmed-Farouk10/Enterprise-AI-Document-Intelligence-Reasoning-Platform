@@ -278,6 +278,18 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
         raise HTTPException(status_code=404, detail="Chat session not found")
     
     # Create user message
+    # Fetch recent history for context
+    recent_messages = []
+    try:
+        # We need to use a new session or ensure the existing one is thread-safe if used in generator,
+        # but here we are in main thread before generator starts.
+        msgs = DatabaseService.get_session_messages(db, session_id)
+        # Convert to dict to avoid detached instance issues in generator
+        recent_messages = [{"role": m.role, "content": m.content} for m in msgs[-5:]]
+    except Exception as e:
+        logger.warning(f"Failed to fetch history: {e}")
+
+    user_message = DatabaseService.create_message(
     user_message = DatabaseService.create_message(
         db=db,
         session_id=session_id,
@@ -298,9 +310,21 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                 return
 
             if len(vector_store.chunks) > 0:
-                # Rewrite query
+                # 1. ORCHESTRATION: Intent Classification
                 yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: analyzing query intent...'})}\n\n"
-                rewritten_query = llm_service.rewrite_query(message_data.content)
+                await asyncio.sleep(0.01)
+                
+                intent = llm_service.classify_intent(message_data.content)
+                yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: identified task as {intent}...'})}\n\n"
+                await asyncio.sleep(0.01)
+
+                # 2. ORCHESTRATION: Context-Aware Query Rewriting
+                # 2. ORCHESTRATION: Context-Aware Query Rewriting
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: optimizing query with context...'})}\n\n"
+                await asyncio.sleep(0.01)
+                
+                # Always use rewrite with history for robustness
+                rewritten_query = llm_service.rewrite_query(message_data.content, chat_history=recent_messages)
                 yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: searching local knowledge base...'})}\n\n"
                 
                 # Retrieve
@@ -317,27 +341,33 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
             
             # --- AGENTIC REASONING LAYER ---
             yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: verifying context sufficiency...'})}\n\n"
+            await asyncio.sleep(0.01)
             
-            # 1. Evaluate Local Context Quality
+            # 4. ORCHESTRATION: Search Permission Control
             should_search = False
             search_reason = ""
             
-            if not retrieved_chunks:
+            # Strict Rules
+            if intent == "ATS_ESTIMATION":
+                should_search = False
+                search_reason = "ATS Estimation requires strictly internal heuristics."
+            elif intent == "GAP_ANALYSIS":
+                should_search = False 
+                search_reason = "Gap Analysis relies strictly on document dates."
+            elif intent == "SEARCH_QUERY":
                 should_search = True
-                search_reason = "No relevant local documents found."
+                search_reason = "User explicitly requested external market/tech data."
             else:
-                # Check confidence of top result
-                top_score = retrieved_chunks[0].get("similarity_score", 0.0)
+                # Fallback to confidence check for GENERAL_CHAT or RESUME_ANALYSIS
+                top_score = retrieved_chunks[0].get("similarity_score", 0.0) if retrieved_chunks else 0.0
                 if top_score < 0.65:
                     should_search = True
                     search_reason = f"Low confidence match ({top_score:.2f}) - Context might be missing."
                 
-                # Check for "External" keywords implies user WANTS outside info (e.g. "market rates", "latest news")
-                # This overrides even good local matches if the intent is clearly external
-                external_keywords = ["market", "global", "benchmark", "score", "average", "news", "trend", "ats"]
+                external_keywords = ["market", "salary", "news", "trend"]
                 if any(k in message_data.content.lower() for k in external_keywords):
                     should_search = True
-                    search_reason = "Query implies need for external benchmarks/data."
+                    search_reason = "Detected external data request keywords."
 
             # 2. Execute Search if Needed
             search_context = ""
@@ -363,7 +393,7 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                          ])
                          
                          # Append to context
-                         context = f"{context}\n\n=== EXTERNAL CREDIBLE SOURCES ===\n{search_context}"
+                         context = f"{context}\n\nEXTERNAL BENCHMARK INFORMATION (FOR REFERENCE ONLY):\n---------------------------------------------------\n{search_context}\n---------------------------------------------------"
                      else:
                          yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: Web search yielded no results. Falling back to general knowledge.'})}\n\n"
                  except Exception as exc:
@@ -372,16 +402,18 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
             else:
                  yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: Local documents provided sufficient context.'})}\n\n"
 
-            # Streaming Generation
+            # 5. ORCHESTRATION: Mode-Locked Generation
+            yield f"data: {json.dumps({'type': 'status', 'content': 'Generating response...'})}\n\n"
             yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
             
-            for token in llm_service.stream_inference(message_data.content, context):
+            # Fetch specialized prompt and inject into context
+            system_prompt = llm_service.get_task_prompt(intent)
+            full_context = f"SYSTEM INSTRUCTION: {system_prompt}\n\nCONTEXT:\n{context}"
+            
+            for token in llm_service.stream_inference(message_data.content, full_context):
                 # Filter lifecycle markers
-                if "[STREAM_START]" in token:
-                     yield f"data: {json.dumps({'type': 'status', 'content': 'Generating response...'})}\n\n"
-                     continue
-                if "[STREAM_END]" in token:
-                     break
+                if "[STREAM_START]" in token: continue
+                if "[STREAM_END]" in token: break
                      
                 full_response += token
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
@@ -389,21 +421,8 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
             # Finalize
             yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'document_context': document_context})}\n\n"
             
-            # Save assistant message to DB (post-streaming)
-            # We can't use the db session here easily if it's closed, but StreamingResponse runs in thread
-            # Best practice: use a background task or new session, but for now we rely on the fact 
-            # that we haven't yielded control significantly enough to lose the db session context 
-            # (though in async it's tricky).
-            # ACTUALLY: The generator runs in the response. We should use a separate service call 
-            # or ensure we have a session. For simplicity in this demo, we assume db is accessible 
-            # or we accept that we might need a fresh session.
-            # To be safe, we will just log it for now or rely on a "save_message" endpoint call from frontend 
-            # if we wanted 100% strictness, but we can try saving here.
-            
+            # Save assistant message to DB
             try:
-                # Re-acquire session or use existing if still valid
-                # Note: This might fail if the request context is torn down. 
-                # Ideally we use BackgroundTasks but we are inside the generator.
                 pass 
             except Exception as e:
                 logger.error("failed_to_save_stream_message", error=str(e))

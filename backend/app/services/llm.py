@@ -222,24 +222,169 @@ class LLMService:
 
         yield "\\n[STREAM_END]"
 
-    def rewrite_query(self, question: str) -> str:
+    def classify_intent(self, query: str) -> str:
         """
-        Query rewriting: Expand complex questions into clearer search queries
+        Classifies the user query into a specific task intent.
+        Returns: 'ATS_ESTIMATION', 'GAP_ANALYSIS', 'RESUME_ANALYSIS', 'GENERAL_CHAT', or 'SEARCH_QUERY'
         """
+        prompt = f"""You are an intent classifier for a Resume Analysis AI.
+        Classify the following user query into exactly ONE category:
+        
+        1. ATS_ESTIMATION: User asks for an ATS score, parse rate, or keyword match.
+        2. GAP_ANALYSIS: User asks about time gaps, employment breaks, or timeline issues.
+        3. RESUME_ANALYSIS: User asks for general feedback, improvements, or critique of the resume.
+        4. SEARCH_QUERY: User asks for EXTERNAL market data, salaries, or specific tech trends (requires web search).
+        5. GENERAL_CHAT: Greetings, clarification, or questions not about the resume.
+
+        Query: "{query}"
+
+        Return ONLY the category name (e.g. ATS_ESTIMATION). Do not add any punctuation.
+        """
+        
         messages = [
-            {"role": "system", "content": "You are a search query optimizer. Rewrite the user's question to be clearer and more specific for document retrieval. Return ONLY the rewritten query."},
-            {"role": "user", "content": f"Question: {question}"}
+            {"role": "system", "content": "You are a precise intent classifier."},
+            {"role": "user", "content": prompt}
         ]
         
-        rewritten = self._run_inference(messages, max_new_tokens=128, temperature=0.3)
+        try:
+            # Quick inference for classification
+            intent = self._run_inference(messages, max_new_tokens=10)
+            intent = intent.strip().upper()
+            
+            # Fallback for hallway hallucinations
+            valid_intents = {"ATS_ESTIMATION", "GAP_ANALYSIS", "RESUME_ANALYSIS", "SEARCH_QUERY", "GENERAL_CHAT"}
+            if intent not in valid_intents:
+                # Basic keyword fallback
+                q = query.lower()
+                if "ats" in q or "score" in q: return "ATS_ESTIMATION"
+                if "gap" in q or "break" in q: return "GAP_ANALYSIS"
+                if "salary" in q or "market" in q: return "SEARCH_QUERY"
+                # If short query, assume general chat or follow up
+                if len(query.split()) < 3: return "GENERAL_CHAT"
+                return "RESUME_ANALYSIS"
+                
+            return intent
+        except Exception as e:
+            logger.error(f"Intent classification failed: {e}")
+            return "RESUME_ANALYSIS"
+
+    def rewrite_query(self, original_query: str, chat_history: List[dict] = None) -> str:
+        """
+        Rewrite the query to be self-contained for vector retrieval, using chat history for context.
+        """
+        if not chat_history:
+            chat_history = []
+            
+        # Format history for context (last 3 turns)
+        history_context = ""
+        if chat_history:
+            # Filter out system messages and large context blocks if stored
+            recent_history = [m for m in chat_history if m['role'] in ('user', 'assistant')][-3:]
+            # Helper to truncate content
+            def trunc(s): return s[:200] + "..." if len(s) > 200 else s
+            history_text = "\n".join([f"{msg['role']}: {trunc(msg['content'])}" for msg in recent_history])
+            history_context = f"Conversation History:\n{history_text}\n"
+
+        prompt = f"""{history_context}
+        Current Query: "{original_query}"
         
-        # Clean up if model is chatty
-        rewritten = rewritten.strip().strip('"').strip("'")
+        Task: Rewrite the current query to be a standalone search query for a vector database.
+        - Resolve pronouns (e.g., "it", "mine", "his") using the history.
+        - If the user says "What about mine", and the history discusses "Ahmed's Resume", rewrite to "Ahmed's Resume".
+        - Improve keywords for retrieval.
+        - Do NOT answer the question. ONLY return the rewritten query string.
         
-        if len(rewritten) > 5:
-            logger.info(f"Query rewritten: '{question}' -> '{rewritten}'")
-            return rewritten
-        return question
+        Rewritten Query:"""
+        
+        messages = [
+            {"role": "system", "content": "You are a query rewriting engine. output ONLY the rewritten query."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        try:
+            response = self._run_inference(messages, max_new_tokens=64)
+            return response.strip().replace('"', '')
+        except Exception:
+            return original_query
+
+    def get_task_prompt(self, intent: str) -> str:
+        """Returns the specialized system prompt for the given intent."""
+        
+        base_prompt = """You are an Enterprise AI Document Intelligence Reasoning Assistant.
+
+A document has been provided. This document is the PRIMARY and PERSISTENT
+source of truth for all analysis and answers.
+
+CORE RESPONSIBILITIES:
+- Read and analyze the document deeply.
+- Help the user achieve their objective with respect to this document.
+- Never invent document-specific facts, values, entities, dates, or claims.
+- Treat the document as active across all follow-up questions unless replaced.
+
+MISSING OR UNCLEAR INFORMATION HANDLING:
+1. First, analyze the document and identify whether the required information
+   is present, missing, or ambiguous.
+2. If the missing information is DOCUMENT-SPECIFIC
+   (e.g., dates, names, totals, clauses, responsibilities),
+   explicitly state: "The document does not specify this."
+   Do NOT search the web.
+3. If the missing information is BENCHMARK, STANDARD, DEFINITION, or
+   INDUSTRY PRACTICE (e.g., ATS scoring criteria, legal norms, market averages),
+   you MAY search external sources.
+
+EXTERNAL SEARCH RULES:
+- Use integrated search tools (e.g., Tavily, DuckDuckGo) only when allowed.
+- Prefer credible, authoritative sources (standards bodies, official docs,
+  reputable companies, recognized institutions).
+- Rank and filter results based on relevance and credibility.
+- Use external information ONLY as reference benchmarks or explanations.
+- Never attribute external information to the document itself.
+
+DOCUMENT-AWARE OBJECTIVES:
+- Resume → improve clarity, impact, ATS alignment, and hiring readiness.
+- Legal document → explain terms, assess risk, highlight obligations and compliance issues.
+- Invoice / financial document → verify correctness, extract values, identify inconsistencies or risks.
+- Adapt analysis style to the document’s purpose while maintaining the same identity.
+
+OUTPUT RULES:
+- Be precise, professional, and document-grounded.
+- Clearly distinguish between:
+  • What the document states
+  • What is inferred from standards or benchmarks
+- Do not expose internal reasoning, system steps, or search mechanics."""
+
+        if intent == "ATS_ESTIMATION":
+            return f"""{base_prompt}
+            
+            TASK: ATS SCORE ESTIMATION
+            - Use ONLY the uploaded resume document.
+            - Do NOT search the web.
+            - Estimate ATS score using known industry heuristics (formatting, keywords, etc).
+            - Provide:
+              1. Final ATS score (0-100)
+              2. Section-by-section breakdown (Formatting, Keywords, Experience, Education)
+              3. Brief justification tied to resume content
+            - If info is missing, deduct points and state why. DO NOT HALLUCINATE."""
+            
+        elif intent == "GAP_ANALYSIS":
+            return f"""{base_prompt}
+            
+            TASK: RESUME GAP ANALYSIS
+            - Analyze the 'Experience' section specifically for dates.
+            - Identify any periods > 3 months not covered by employment or education.
+            - Be precise with months/years.
+            - If no gaps exist, clearly state that the timeline is continuous."""
+            
+        elif intent == "RESUME_ANALYSIS":
+            return f"""{base_prompt}
+            
+            TASK: DETAILED RESUME CRITIQUE
+            - Analyze the resume for impact, clarity, and strength.
+            - Highlight key strengths and specific weaknesses.
+            - Focus on: Quantifiable metrics, Action verbs, Layout/Readability."""
+            
+        else:
+            return base_prompt
 
     def grade_relevance(self, context: str, question: str) -> bool:
         """
