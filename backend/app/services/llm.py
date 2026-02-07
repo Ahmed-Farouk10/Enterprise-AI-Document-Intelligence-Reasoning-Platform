@@ -5,6 +5,7 @@ import time
 import os
 import torch
 from typing import List, Optional, Dict, Any
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +16,9 @@ class LLMService:
         self.tokenizer = None
         self.model = None
         
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def load_model(self):
-        """Lazy load the model"""
+        """Lazy load the model with retries"""
         if self.model is not None:
             return
 
