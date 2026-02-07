@@ -310,29 +310,43 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                 return
 
             if len(vector_store.chunks) > 0:
-                # 1. ORCHESTRATION: Intent Classification
-                yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: analyzing query intent...'})}\n\n"
+                # 1. ORCHESTRATION: Parallel Intent & Rewrite
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: analyzing intent & context...'})}\n\n"
                 await asyncio.sleep(0.01)
+
+                loop = asyncio.get_running_loop()
                 
-                intent = llm_service.classify_intent(message_data.content)
+                # Execute blocking LLM calls in parallel threads
+                # Task A: Classify Intent
+                task_intent = loop.run_in_executor(None, llm_service.classify_intent, message_data.content)
+                # Task B: Rewrite Query (Optimistically)
+                task_rewrite = loop.run_in_executor(None, lambda: llm_service.rewrite_query(message_data.content, chat_history=recent_messages))
+                
+                # Wait for both (Parallel Execution)
+                intent, rewritten_query = await asyncio.gather(task_intent, task_rewrite)
+                
                 yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: identified task as {intent}...'})}\n\n"
                 await asyncio.sleep(0.01)
 
-                # 2. ORCHESTRATION: Context-Aware Query Rewriting
-                # 2. ORCHESTRATION: Context-Aware Query Rewriting
-                yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: optimizing query with context...'})}\n\n"
-                await asyncio.sleep(0.01)
+                # 2. ORCHESTRATION: Fast-Path Routing
+                final_query = rewritten_query
                 
-                # Always use rewrite with history for robustness
-                rewritten_query = llm_service.rewrite_query(message_data.content, chat_history=recent_messages)
-                yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: searching local knowledge base...'})}\n\n"
+                if intent == "GENERAL_CHAT":
+                    # Fast Path: Verify if we even need retrieval. 
+                    # For now, we still retrieve but maybe with original query if rewrite failed or was weird.
+                    # But actually, rewrite is usually good.
+                    # Optimization: If highly confident it's greetings ("hi"), we could skip retrieval.
+                    # For now, let's keep retrieval but use the rewritten one.
+                    pass
+                else:
+                    yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: searching local knowledge base...'})}\n\n"
                 
-                # Retrieve
-                retrieved_chunks = vector_store.retrieve_with_citations(rewritten_query, k=3)
+                # Retrieve using the result from parallel execution
+                retrieved_chunks = vector_store.retrieve_with_citations(final_query, k=3)
                 
                 if retrieved_chunks:
                     context = "\n\n".join([f"[{c['doc_name']}] {c['text']}" for c in retrieved_chunks])
-                    yield f"data: {json.dumps({'type': 'status', 'content': 'Reading context...'})}\n\n"
+                    # yield f"data: {json.dumps({'type': 'status', 'content': 'Reading context...'})}\n\n"
                     
                     document_context = {
                         "document_name": retrieved_chunks[0]["doc_name"],
