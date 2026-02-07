@@ -414,15 +414,16 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
             search_context = ""
             if should_search:
                  yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: {search_reason} Optimizing search query...'})}\n\n"
+                 await asyncio.sleep(0.01) # Yield
                  
                  # Generate Smart Query
                  smart_query = llm_service.generate_search_query(message_data.content, context)
-                 # Fix: Avoid backslash in f-string expression for Python < 3.12
                  msg = f"Thinking: Searching web for '{smart_query}'..."
                  yield f"data: {json.dumps({'type': 'status', 'content': msg})}\n\n"
                  
                  try:
-                     search_results = search_service.search(smart_query, num_results=5)
+                     # NON-BLOCKING SEARCH: Run in thread pool
+                     search_results = await asyncio.to_thread(search_service.search, smart_query, num_results=5)
                      
                      if search_results:
                          yield f"data: {json.dumps({'type': 'status', 'content': f'Found {len(search_results)} credible results. Verifying...'})}\n\n"
@@ -458,10 +459,29 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
             # Factual = 20s, Evaluative = 45s, Improvement = 90s
             timeout_limit = 90.0 if depth == "IMPROVEMENT" else (45.0 if depth == "EVALUATIVE" else 20.0)
 
+            # Helper for non-blocking iteration
+            async def async_wrap_iter(iterable):
+                """Wraps a sync iterator in an async generator using run_in_executor"""
+                loop = asyncio.get_event_loop()
+                iterator = iter(iterable)
+                done = False
+                while not done:
+                    try:
+                        # Offload the blocking next() call to a thread
+                        # This allows the event loop to stay responsive (and process timeouts)
+                        value = await loop.run_in_executor(None, next, iterator)
+                        yield value
+                    except StopIteration:
+                        done = True
+                    except Exception as e:
+                        logger.error(f"Async iterator error: {e}")
+                        done = True
+
             try:
                 # Wrap generation in timeout block
                 async def generate_stream():
-                    for token in llm_service.stream_inference(message_data.content, full_context):
+                    # Turn sync generator into async one to prevent loop blocking
+                    async for token in async_wrap_iter(llm_service.stream_inference(message_data.content, full_context)):
                         if "[STREAM_START]" in token: continue
                         if "[STREAM_END]" in token: break
                         yield token
