@@ -479,7 +479,8 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                     
                     # Manual Timeout Check
                     if (asyncio.get_event_loop().time() - start_time) > timeout_limit:
-                        yield f"data: {json.dumps({'type': 'token', 'content': '\n\n[Timed out - Response Truncated for Speed]'})}\n\n"
+                        timeout_msg = json.dumps({'type': 'token', 'content': '\n\n[Timed out - Response Truncated for Speed]'})
+                        yield f"data: {timeout_msg}\n\n"
                         break
                         
             except Exception as gen_err:
