@@ -323,6 +323,11 @@ CORE PRINCIPLES:
 5. Only search the web if the document itself is insufficient AND
    the question requires external validation or enrichment.
 
+EVIDENCE GATING & SENIORITY CALIBRATION:
+- Do not extrapolate seniority. (e.g., "Student Lead" ≠ "Engineering Manager").
+- Distinguish clearly between "Internship/Student Project" and "Full-Time Industry Experience".
+- If a role is "Member" or "Participant", do not frame it as "Strategic Leadership" unless explicitly proven by bullets.
+
 DOCUMENT AWARENESS:
 - Treat the document as persistent across follow-up questions.
 - Do not re-summarize the document unless explicitly asked.
@@ -349,15 +354,15 @@ OUTPUT RULES:
         if intent == "ATS_ESTIMATION":
             return f"""{base_prompt}
             
-            TASK: Estimate ATS Score based on industry heuristics.
+            TASK: Estimate ATS Compatibility based on industry heuristics.
             RESPONSE FORMAT:
-            - Final ATS Score: [0-100]
-            - formatting_score: [0-25] (Assessment of layout/parsing)
-            - keyword_score: [0-25] (Assessment of industry terms)
-            - content_impact: [0-50] (Assessment of metrics/action verbs)
+            - ATS Match Level: [High / Medium / Low] (NOT an arbitrary number)
+            - Role-Specific Fit: [Assessment against target role keywords]
+            - Parsing Quality: [High/Low] (Layout, tables, fonts)
+            - Keyword Analysis: [Critical missing vs present terms]
             - Breakdown: [Brief bullet points]
-            - Missing Critical Elements: [List]
             
+            DO NOT output a fake "Score out of 100".
             Do NOT search the web. Use internal knowledge of ATS systems."""
             
         elif intent == "GAP_ANALYSIS":
@@ -376,11 +381,13 @@ OUTPUT RULES:
             
             TASK: Detailed Resume Critique for Impact and Clarity.
             RESPONSE FORMAT:
-            - Executive Summary: [2 lines]
+            - Executive Summary: [2 lines - Be Honest about Seniority Level]
             - Key Strengths: [3 bullets]
             - Critical Weaknesses: [3 bullets]
             - Actionable Improvements: [Specific edits to make]
-            Focus on quantifying achievements and removing fluff."""
+            
+            Calibration Rule: Clearly distinguish between Internships and Full-Time roles. 
+            Do not overstate student leadership as corporate management."""
             
         elif intent == "SEARCH_QUERY":
             return f"""{base_prompt}
