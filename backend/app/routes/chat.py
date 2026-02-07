@@ -310,8 +310,8 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                 return
 
             if len(vector_store.chunks) > 0:
-                # 1. ORCHESTRATION: Parallel Intent & Rewrite
-                yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: analyzing intent & context...'})}\n\n"
+                # 1. ORCHESTRATION: Parallel Control Stack (Intent, Depth, Scope, Rewrite)
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: analyzing intent, depth, & scope...'})}\n\n"
                 await asyncio.sleep(0.01)
 
                 loop = asyncio.get_running_loop()
@@ -321,11 +321,15 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                 task_intent = loop.run_in_executor(None, llm_service.classify_intent, message_data.content)
                 # Task B: Rewrite Query (Optimistically)
                 task_rewrite = loop.run_in_executor(None, lambda: llm_service.rewrite_query(message_data.content, chat_history=recent_messages))
+                # Task C: Classify Reasoning Depth (Phase 12)
+                task_depth = loop.run_in_executor(None, llm_service.classify_depth, message_data.content)
+                # Task D: Detect Analysis Scope (Phase 12)
+                task_scope = loop.run_in_executor(None, llm_service.detect_scope, message_data.content)
                 
-                # Wait for both (Parallel Execution)
-                intent, rewritten_query = await asyncio.gather(task_intent, task_rewrite)
+                # Wait for all (Parallel Execution)
+                intent, rewritten_query, depth, scope = await asyncio.gather(task_intent, task_rewrite, task_depth, task_scope)
                 
-                yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: identified task as {intent}...'})}\n\n"
+                yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: {intent} | {depth} | Scope: {scope}'})}\n\n"
                 await asyncio.sleep(0.01)
 
                 # 2. ORCHESTRATION: Fast-Path Routing
@@ -334,15 +338,12 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                 if intent == "GENERAL_CHAT":
                     # Fast Path: Verify if we even need retrieval. 
                     # For now, we still retrieve but maybe with original query if rewrite failed or was weird.
-                    # But actually, rewrite is usually good.
-                    # Optimization: If highly confident it's greetings ("hi"), we could skip retrieval.
-                    # For now, let's keep retrieval but use the rewritten one.
                     pass
                 else:
                     yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: searching local knowledge base...'})}\n\n"
                 
                 # Retrieve using the result from parallel execution
-                retrieved_chunks = vector_store.retrieve_with_citations(final_query, k=3)
+                retrieved_chunks = vector_store.retrieve_with_citations(final_query, k=5 if depth == "IMPROVEMENT" else 3)
                 
                 if retrieved_chunks:
                     context = "\n\n".join([f"[{c['doc_name']}] {c['text']}" for c in retrieved_chunks])

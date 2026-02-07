@@ -309,98 +309,117 @@ class LLMService:
         except Exception:
             return original_query
 
-    def get_task_prompt(self, intent: str) -> str:
-        """Returns the specialized system prompt for the given intent."""
+    def classify_depth(self, query: str) -> str:
+        """
+        Classifies the reasoning depth required for the query.
+        Returns: FACTUAL | EVALUATIVE | IMPROVEMENT
+        """
+        prompt = f"""SYSTEM:
+        You are a reasoning depth controller for an Enterprise AI Document Intelligence Platform.
+
+        Classify the user's request into EXACTLY ONE category:
+
+        - FACTUAL: The user asks for specific information directly stated in the document.
+        - EVALUATIVE: The user asks for assessment, comparison, or judgment WITHOUT asking to improve or rewrite.
+        - IMPROVEMENT: The user explicitly asks to improve, optimize, rewrite, strengthen, or make the document better.
+
+        RULES:
+        - If the user does NOT explicitly request improvement, DO NOT select IMPROVEMENT.
+        - Return ONLY the category name.
+
+        USER QUERY:
+        "{query}"
+        """
+        try:
+            response = self._run_inference([{"role": "user", "content": prompt}], max_new_tokens=10)
+            cleaned = response.strip().upper()
+            if "IMPROVEMENT" in cleaned: return "IMPROVEMENT"
+            if "EVALUATIVE" in cleaned: return "EVALUATIVE"
+            return "FACTUAL"
+        except Exception:
+            return "EVALUATIVE"
+
+    def detect_scope(self, query: str) -> List[str]:
+        """
+        Detects the specific scope/sections of the document to analyze.
+        """
+        prompt = f"""SYSTEM:
+        You are a document scope detector.
+        From the user query, extract which parts of the document must be analyzed.
+
+        Possible scopes (return ALL that apply):
+        - WORK_HISTORY
+        - EDUCATION
+        - SKILLS
+        - LEADERSHIP
+        - ATS_COMPATIBILITY
+        - FORMATTING
+        - KEYWORDS
+        - ROLE_FIT
+        - ENTIRE_DOCUMENT
+
+        RULES:
+        - Only include scopes explicitly implied by the question.
+        - Return a comma-separated list.
+        - Do NOT explain.
+
+        USER QUERY:
+        "{query}"
+        """
+        try:
+            response = self._run_inference([{"role": "user", "content": prompt}], max_new_tokens=20)
+            return [s.strip() for s in response.split(",") if s.strip()]
+        except Exception:
+            return ["ENTIRE_DOCUMENT"]
+
+    def get_task_prompt(self, intent: str, depth: str = "EVALUATIVE", scope: List[str] = None) -> str:
+        """
+        Returns the specialized system prompt based on Intent, Depth, and Scope.
+        Phase 12: Controlled Deep Improvement.
+        """
+        if scope is None:
+            scope = ["ENTIRE_DOCUMENT"]
+            
+        scope_str = ", ".join(scope)
         
-        base_prompt = """You are an Enterprise AI Document Intelligence & Reasoning Platform.
+        # Base Persona
+        base_prompt = f"""You are an Enterprise Document Improvement Engine.
 
-Your role is to help users achieve their objective with a provided document
-(resume, legal document, invoice, policy, technical file, or similar).
+DOCUMENT TYPE: Professional/Technical/Legal
+USER OBJECTIVE: {intent}
+ANALYSIS SCOPE: {scope_str}
 
-CORE PRINCIPLES:
-1. The uploaded document is the SINGLE source of truth.
-2. Never invent, assume, or repeat information.
-3. Answer ONLY what the user asks — no extra analysis unless requested.
-4. If information is missing, unclear, or ambiguous, explicitly say so.
-5. Only search the web if the document itself is insufficient AND
-   the question requires external validation or enrichment.
+STRICT RULES:
+1. Use ONLY information explicitly present in the document when referring to the subject.
+2. If something is missing, say: "The document does not mention X."
+3. Use external benchmarks ONLY for standards (if requested), never as facts about the document.
+4. Stay strictly within the analysis scope ({scope_str}).
+5. Do NOT add sections not requested.
+6. Be concise but expert-level."""
 
-EVIDENCE GATING & SENIORITY CALIBRATION:
-- Do not extrapolate seniority. (e.g., "Student Lead" ≠ "Engineering Manager").
-- Distinguish clearly between "Internship/Student Project" and "Full-Time Industry Experience".
-- If a role is "Member" or "Participant", do not frame it as "Strategic Leadership" unless explicitly proven by bullets.
+        # Depth-Specific Instructions
+        if depth == "FACTUAL":
+            base_prompt += "\n\nMODE: FACTUAL\n- Provide the exact answer directly from the text.\n- Do not analyze or opinionate.\n- Be extremely concise."
+        elif depth == "EVALUATIVE":
+            base_prompt += "\n\nMODE: EVALUATIVE\n- Assess the document against the objective.\n- Highlight evidence pro/con.\n- Do not rewrite content."
+        elif depth == "IMPROVEMENT":
+            base_prompt += """\n\nMODE: IMPROVEMENT (DEEP ANALYSIS)
+- Critically evaluate the specific scope.
+- OUTPUT SECTIONS:
+  1. Issues Identified (Specific to scope)
+  2. Concrete Improvements (Actionable, specific changes)
+  3. Example Rewrite (Only for the section in scope)
+- Tone: Professional, Senior Reviewer, No Fluff."""
 
-DOCUMENT AWARENESS:
-- Treat the document as persistent across follow-up questions.
-- Do not re-summarize the document unless explicitly asked.
-- Do not duplicate entries or infer missing dates, roles, or facts.
-
-QUESTION HANDLING RULES:
-- Factual question → factual answer only.
-- Evaluative question → compare against the stated objective.
-- Gap/missing question → identify absence without guessing.
-- Improvement question → provide actionable, document-grounded feedback.
-
-WEB SEARCH RULES:
-- Trigger web search ONLY if:
-  a) Required information is not present in the document, AND
-  b) The question cannot be answered without external data.
-- Use only credible, ranked sources.
-- Clearly separate document facts from external findings.
-
-OUTPUT RULES:
-- Be concise, structured, and accurate.
-- Do not repeat content unnecessarily.
-- Never add assumptions, praise, or critique unless requested."""
-
+        # Intent-Specific Overrides (Legacy compatibility + nuance)
         if intent == "ATS_ESTIMATION":
-            return f"""{base_prompt}
-            
-            TASK: Estimate ATS Compatibility based on industry heuristics.
-            RESPONSE FORMAT:
-            - ATS Match Level: [High / Medium / Low] (NOT an arbitrary number)
-            - Role-Specific Fit: [Assessment against target role keywords]
-            - Parsing Quality: [High/Low] (Layout, tables, fonts)
-            - Keyword Analysis: [Critical missing vs present terms]
-            - Breakdown: [Brief bullet points]
-            
-            DO NOT output a fake "Score out of 100".
-            Do NOT search the web. Use internal knowledge of ATS systems."""
-            
+             base_prompt += "\n\nTASK: ATS Analysis. Focus on Keywords, Formatting, and Parseability."
         elif intent == "GAP_ANALYSIS":
-            return f"""{base_prompt}
-            
-            TASK: Identify time gaps in work history. Do not evaluate skills or fit.
-            RESPONSE FORMAT:
-            - Chronological Timeline: [List start-end dates]
-            - Gaps Identified: [List gaps > 3 months with specific dates]
-            - Analysis: [Brief grounded comment on continuity]
-            If no gaps exist, state: "No significant employment gaps found."
-            Do NOT search the web."""
-            
-        elif intent == "RESUME_ANALYSIS":
-            return f"""{base_prompt}
-            
-            TASK: Detailed Resume Critique for Impact and Clarity.
-            RESPONSE FORMAT:
-            - Executive Summary: [2 lines - Be Honest about Seniority Level]
-            - Key Strengths: [3 bullets]
-            - Critical Weaknesses: [3 bullets]
-            - Actionable Improvements: [Specific edits to make]
-            
-            Calibration Rule: Clearly distinguish between Internships and Full-Time roles. 
-            Do not overstate student leadership as corporate management."""
-            
+             base_prompt += "\n\nTASK: Continuity Check. Identify significant date gaps (>3 months)."
         elif intent == "SEARCH_QUERY":
-            return f"""{base_prompt}
-            
-            TASK: Enriched External Information Retrieval.
-            User has explicitly requested outside information.
-            Synthesize search results with document context if relevant.
-            Use header: EXTERNAL BENCHMARK INFORMATION (FOR REFERENCE ONLY)."""
+             base_prompt += "\n\nTASK: External Search Integration. Clearly separate external findings from document facts."
 
-        else:
-            return base_prompt
+        return base_prompt
 
     def grade_relevance(self, context: str, question: str) -> bool:
         """
