@@ -280,7 +280,7 @@ class LLMService:
             text,
             return_tensors="pt",
             truncation=True,
-            max_length=8192
+            max_length=16384  # Up from 8192 to handle large resumes + RAG context
         )
 
         streamer = TextIteratorStreamer(
@@ -293,9 +293,9 @@ class LLMService:
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
             streamer=streamer,
-            max_new_tokens=1024,
+            max_new_tokens=2048,      # Up from 1024 for detailed reports
             do_sample=True,
-            temperature=0.25,         # ← lower for factual streaming
+            temperature=0.25,         # keep it low for factual streaming
             repetition_penalty=1.1,
             max_time=120.0
         )
