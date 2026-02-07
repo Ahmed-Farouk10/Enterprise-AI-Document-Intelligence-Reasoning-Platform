@@ -300,6 +300,7 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
         context = ""
         full_response = ""
         document_context = None
+        intent = "GENERAL_CHAT"  # Default intent if no documents to analyze
         
         # RAG Logic (Simplified for streaming)
         try:
