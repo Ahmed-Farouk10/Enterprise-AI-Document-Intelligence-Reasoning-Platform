@@ -354,6 +354,32 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                         "relevant_chunks": [c["text"][:200] + "..." for c in retrieved_chunks]
                     }
             
+            # --- PHASE 13: LATENCY OPTIMIZATION ---
+            # 1. Check Cycle Cache (Semantic Caching)
+            # If we have the exact same query + intent + relevant chunks, return cached answer.
+            cache_key = ""
+            if intent in ["IMPROVEMENT", "EVALUATIVE"] and retrieved_chunks:
+                # Create a stable key based on query intent and the specific document chunks content
+                doc_hash = str(sum(hash(c['text']) for c in retrieved_chunks))
+                cache_key = f"analysis:{intent}:{depth}:{scope}:{doc_hash}"
+                
+                cached_analysis = cache_service.get(cache_key)
+                if cached_analysis:
+                     yield f"data: {json.dumps({'type': 'status', 'content': '⚡ Instant Analysis (Cached Response)'})}\n\n"
+                     await asyncio.sleep(0.5) # UX pause
+                     # Stream the cached content as if it were generating
+                     yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
+                     
+                     # Chunk it to simulate streaming (better UX than a massive text dump)
+                     chunk_size = 50
+                     content = cached_analysis.get("content", "")
+                     for i in range(0, len(content), chunk_size):
+                         yield f"data: {json.dumps({'type': 'token', 'content': content[i:i+chunk_size]})}\n\n"
+                         await asyncio.sleep(0.01)
+                         
+                     yield f"data: {json.dumps({'type': 'done', 'content': content, 'document_context': document_context})}\n\n"
+                     return # Exit early!
+
             # --- AGENTIC REASONING LAYER ---
             yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: verifying context sufficiency...'})}\n\n"
             await asyncio.sleep(0.01)
@@ -422,23 +448,67 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
             yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
             
             # Fetch specialized prompt and inject into context
-            system_prompt = llm_service.get_task_prompt(intent)
+            system_prompt = llm_service.get_task_prompt(intent, depth=depth, scope=scope)
             full_context = f"SYSTEM INSTRUCTION: {system_prompt}\n\nCONTEXT:\n{context}"
             
-            for token in llm_service.stream_inference(message_data.content, full_context):
-                # Filter lifecycle markers
-                if "[STREAM_START]" in token: continue
-                if "[STREAM_END]" in token: break
-                     
-                full_response += token
-                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+            # Dynamic Token Budget (Phase 12)
+            token_limit = 1024 if depth == "IMPROVEMENT" else (400 if depth == "EVALUATIVE" else 150)
+            
+            # Hard Timeout (Phase 13)
+            # Factual = 20s, Evaluative = 45s, Improvement = 90s
+            timeout_limit = 90.0 if depth == "IMPROVEMENT" else (45.0 if depth == "EVALUATIVE" else 20.0)
+
+            try:
+                # Wrap generation in timeout block
+                async def generate_stream():
+                    for token in llm_service.stream_inference(message_data.content, full_context):
+                        if "[STREAM_START]" in token: continue
+                        if "[STREAM_END]" in token: break
+                        yield token
+
+                # We can't strictly timeout the *generator* easily in async without buffering, 
+                # but we can enforce strict kwargs in llm_service.stream_inference (max_time).
+                # The LLMService already has `max_time=120.0`. We will trust that for safety, 
+                # but we can check checking time here if needed.
                 
+                # Streaming loop
+                start_time = asyncio.get_event_loop().time()
+                async for token in generate_stream():
+                    full_response += token
+                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                    
+                    # Manual Timeout Check
+                    if (asyncio.get_event_loop().time() - start_time) > timeout_limit:
+                        yield f"data: {json.dumps({'type': 'token', 'content': '\n\n[Timed out - Response Truncated for Speed]'})}\n\n"
+                        break
+                        
+            except Exception as gen_err:
+                logger.error(f"Generation error: {gen_err}")
+                yield f"data: {json.dumps({'type': 'error', 'content': 'Error generating response.'})}\n\n"
+
             # Finalize
             yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'document_context': document_context})}\n\n"
             
             # Save assistant message to DB
             try:
-                pass 
+                new_ai_msg = DatabaseService.create_message(
+                    db=db,
+                    session_id=session_id,
+                    role="assistant",
+                    content=full_response,
+                    document_context=document_context
+                )
+                
+                # --- PHASE 13: CACHE WRITE ---
+                if cache_key and len(full_response) > 50:
+                    cache_data = {
+                        "content": full_response,
+                        "document_context": document_context
+                    }
+                    # Cache for 1 hour
+                    cache_service.set(cache_key, cache_data, ttl=3600)
+                    logger.info("analysis_cached", key=cache_key)
+                    
             except Exception as e:
                 logger.error("failed_to_save_stream_message", error=str(e))
                 

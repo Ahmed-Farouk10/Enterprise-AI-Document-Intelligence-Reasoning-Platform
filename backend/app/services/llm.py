@@ -9,6 +9,99 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
+# --- PRE-COMPILED PROMPTS (Phase 13 Optimization) ---
+
+PROMPT_INTENT_CLASSIFIER = """You are an intent classifier for a Resume Analysis AI.
+Classify the following user query into exactly ONE category:
+
+1. ATS_ESTIMATION: User asks for an ATS score, parse rate, or keyword match.
+2. GAP_ANALYSIS: User asks about time gaps, employment breaks, or timeline issues.
+3. RESUME_ANALYSIS: User asks for general feedback, improvements, or critique of the resume.
+4. SEARCH_QUERY: User asks for EXTERNAL market data, salaries, or specific tech trends (requires web search).
+5. GENERAL_CHAT: Greetings, clarification, or questions not about the resume.
+
+Query: "{query}"
+
+Return ONLY the category name (e.g. ATS_ESTIMATION). Do not add any punctuation."""
+
+PROMPT_QUERY_REWRITER = """{history_context}
+Current Query: "{original_query}"
+
+Task: Rewrite the current query to be a standalone search query for a vector database.
+- Resolve pronouns (e.g., "it", "mine", "his") using the history.
+- If the user says "What about mine", and the history discusses "Ahmed's Resume", rewrite to "Ahmed's Resume".
+- Improve keywords for retrieval.
+- Do NOT answer the question. ONLY return the rewritten query string.
+
+Rewritten Query:"""
+
+PROMPT_DEPTH_CLASSIFIER = """SYSTEM:
+You are a reasoning depth controller for an Enterprise AI Document Intelligence Platform.
+
+Classify the user's request into EXACTLY ONE category:
+
+- FACTUAL: The user asks for specific information directly stated in the document.
+- EVALUATIVE: The user asks for assessment, comparison, or judgment WITHOUT asking to improve or rewrite.
+- IMPROVEMENT: The user explicitly asks to improve, optimize, rewrite, strengthen, or make the document better.
+
+RULES:
+- If the user does NOT explicitly request improvement, DO NOT select IMPROVEMENT.
+- Return ONLY the category name.
+
+USER QUERY:
+"{query}"
+"""
+
+PROMPT_SCOPE_DETECTOR = """SYSTEM:
+You are a document scope detector.
+From the user query, extract which parts of the document must be analyzed.
+
+Possible scopes (return ALL that apply):
+- WORK_HISTORY
+- EDUCATION
+- SKILLS
+- LEADERSHIP
+- ATS_COMPATIBILITY
+- FORMATTING
+- KEYWORDS
+- ROLE_FIT
+- ENTIRE_DOCUMENT
+
+RULES:
+- Only include scopes explicitly implied by the question.
+- Return a comma-separated list.
+- Do NOT explain.
+
+USER QUERY:
+"{query}"
+"""
+
+PROMPT_TASK_BASE = """You are an Enterprise Document Improvement Engine.
+
+DOCUMENT TYPE: Professional/Technical/Legal
+USER OBJECTIVE: {intent}
+ANALYSIS SCOPE: {scope_str}
+
+STRICT RULES:
+1. Use ONLY information explicitly present in the document when referring to the subject.
+2. If something is missing, say: "The document does not mention X."
+3. Use external benchmarks ONLY for standards (if requested), never as facts about the document.
+4. Stay strictly within the analysis scope ({scope_str}).
+5. Do NOT add sections not requested.
+6. Be concise but expert-level."""
+
+PROMPT_MODE_FACTUAL = "\n\nMODE: FACTUAL\n- Provide the exact answer directly from the text.\n- Do not analyze or opinionate.\n- Be extremely concise."
+PROMPT_MODE_EVALUATIVE = "\n\nMODE: EVALUATIVE\n- Assess the document against the objective.\n- Highlight evidence pro/con.\n- Do not rewrite content."
+PROMPT_MODE_IMPROVEMENT = """\n\nMODE: IMPROVEMENT (DEEP ANALYSIS)
+- Critically evaluate the specific scope.
+- OUTPUT SECTIONS:
+  1. Issues Identified (Specific to scope)
+  2. Concrete Improvements (Actionable, specific changes)
+  3. Example Rewrite (Only for the section in scope)
+- Tone: Professional, Senior Reviewer, No Fluff."""
+
+# --------------------------------------------------------
+
 class LLMService:
     def __init__(self):
         # Upgrade to Qwen2.5-1.5B-Instruct (SOTA for <3B params)
@@ -229,19 +322,7 @@ class LLMService:
         Classifies the user query into a specific task intent.
         Returns: 'ATS_ESTIMATION', 'GAP_ANALYSIS', 'RESUME_ANALYSIS', 'GENERAL_CHAT', or 'SEARCH_QUERY'
         """
-        prompt = f"""You are an intent classifier for a Resume Analysis AI.
-        Classify the following user query into exactly ONE category:
-        
-        1. ATS_ESTIMATION: User asks for an ATS score, parse rate, or keyword match.
-        2. GAP_ANALYSIS: User asks about time gaps, employment breaks, or timeline issues.
-        3. RESUME_ANALYSIS: User asks for general feedback, improvements, or critique of the resume.
-        4. SEARCH_QUERY: User asks for EXTERNAL market data, salaries, or specific tech trends (requires web search).
-        5. GENERAL_CHAT: Greetings, clarification, or questions not about the resume.
-
-        Query: "{query}"
-
-        Return ONLY the category name (e.g. ATS_ESTIMATION). Do not add any punctuation.
-        """
+        prompt = PROMPT_INTENT_CLASSIFIER.format(query=query)
         
         messages = [
             {"role": "system", "content": "You are a precise intent classifier."},
@@ -287,16 +368,7 @@ class LLMService:
             history_text = "\n".join([f"{msg['role']}: {trunc(msg['content'])}" for msg in recent_history])
             history_context = f"Conversation History:\n{history_text}\n"
 
-        prompt = f"""{history_context}
-        Current Query: "{original_query}"
-        
-        Task: Rewrite the current query to be a standalone search query for a vector database.
-        - Resolve pronouns (e.g., "it", "mine", "his") using the history.
-        - If the user says "What about mine", and the history discusses "Ahmed's Resume", rewrite to "Ahmed's Resume".
-        - Improve keywords for retrieval.
-        - Do NOT answer the question. ONLY return the rewritten query string.
-        
-        Rewritten Query:"""
+        prompt = PROMPT_QUERY_REWRITER.format(history_context=history_context, original_query=original_query)
         
         messages = [
             {"role": "system", "content": "You are a query rewriting engine. output ONLY the rewritten query."},
@@ -314,22 +386,7 @@ class LLMService:
         Classifies the reasoning depth required for the query.
         Returns: FACTUAL | EVALUATIVE | IMPROVEMENT
         """
-        prompt = f"""SYSTEM:
-        You are a reasoning depth controller for an Enterprise AI Document Intelligence Platform.
-
-        Classify the user's request into EXACTLY ONE category:
-
-        - FACTUAL: The user asks for specific information directly stated in the document.
-        - EVALUATIVE: The user asks for assessment, comparison, or judgment WITHOUT asking to improve or rewrite.
-        - IMPROVEMENT: The user explicitly asks to improve, optimize, rewrite, strengthen, or make the document better.
-
-        RULES:
-        - If the user does NOT explicitly request improvement, DO NOT select IMPROVEMENT.
-        - Return ONLY the category name.
-
-        USER QUERY:
-        "{query}"
-        """
+        prompt = PROMPT_DEPTH_CLASSIFIER.format(query=query)
         try:
             response = self._run_inference([{"role": "user", "content": prompt}], max_new_tokens=10)
             cleaned = response.strip().upper()
@@ -343,29 +400,7 @@ class LLMService:
         """
         Detects the specific scope/sections of the document to analyze.
         """
-        prompt = f"""SYSTEM:
-        You are a document scope detector.
-        From the user query, extract which parts of the document must be analyzed.
-
-        Possible scopes (return ALL that apply):
-        - WORK_HISTORY
-        - EDUCATION
-        - SKILLS
-        - LEADERSHIP
-        - ATS_COMPATIBILITY
-        - FORMATTING
-        - KEYWORDS
-        - ROLE_FIT
-        - ENTIRE_DOCUMENT
-
-        RULES:
-        - Only include scopes explicitly implied by the question.
-        - Return a comma-separated list.
-        - Do NOT explain.
-
-        USER QUERY:
-        "{query}"
-        """
+        prompt = PROMPT_SCOPE_DETECTOR.format(query=query)
         try:
             response = self._run_inference([{"role": "user", "content": prompt}], max_new_tokens=20)
             return [s.strip() for s in response.split(",") if s.strip()]
@@ -383,33 +418,15 @@ class LLMService:
         scope_str = ", ".join(scope)
         
         # Base Persona
-        base_prompt = f"""You are an Enterprise Document Improvement Engine.
-
-DOCUMENT TYPE: Professional/Technical/Legal
-USER OBJECTIVE: {intent}
-ANALYSIS SCOPE: {scope_str}
-
-STRICT RULES:
-1. Use ONLY information explicitly present in the document when referring to the subject.
-2. If something is missing, say: "The document does not mention X."
-3. Use external benchmarks ONLY for standards (if requested), never as facts about the document.
-4. Stay strictly within the analysis scope ({scope_str}).
-5. Do NOT add sections not requested.
-6. Be concise but expert-level."""
+        base_prompt = PROMPT_TASK_BASE.format(intent=intent, scope_str=scope_str)
 
         # Depth-Specific Instructions
         if depth == "FACTUAL":
-            base_prompt += "\n\nMODE: FACTUAL\n- Provide the exact answer directly from the text.\n- Do not analyze or opinionate.\n- Be extremely concise."
+            base_prompt += PROMPT_MODE_FACTUAL
         elif depth == "EVALUATIVE":
-            base_prompt += "\n\nMODE: EVALUATIVE\n- Assess the document against the objective.\n- Highlight evidence pro/con.\n- Do not rewrite content."
+            base_prompt += PROMPT_MODE_EVALUATIVE
         elif depth == "IMPROVEMENT":
-            base_prompt += """\n\nMODE: IMPROVEMENT (DEEP ANALYSIS)
-- Critically evaluate the specific scope.
-- OUTPUT SECTIONS:
-  1. Issues Identified (Specific to scope)
-  2. Concrete Improvements (Actionable, specific changes)
-  3. Example Rewrite (Only for the section in scope)
-- Tone: Professional, Senior Reviewer, No Fluff."""
+            base_prompt += PROMPT_MODE_IMPROVEMENT
 
         # Intent-Specific Overrides (Legacy compatibility + nuance)
         if intent == "ATS_ESTIMATION":
