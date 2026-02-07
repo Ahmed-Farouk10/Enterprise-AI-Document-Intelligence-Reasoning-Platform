@@ -422,8 +422,10 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                  yield f"data: {json.dumps({'type': 'status', 'content': msg})}\n\n"
                  
                  try:
-                     # NON-BLOCKING SEARCH: Run in thread pool
-                     search_results = await asyncio.to_thread(search_service.search, smart_query, num_results=5)
+                     # NON-BLOCKING SEARCH: Run in thread pool with STRICT timeout
+                     # Tavily sometimes hangs for 60s. We cap it at 5s to keep the app snappy.
+                     search_task = asyncio.to_thread(search_service.search, smart_query, num_results=5)
+                     search_results = await asyncio.wait_for(search_task, timeout=5.0)
                      
                      if search_results:
                          yield f"data: {json.dumps({'type': 'status', 'content': f'Found {len(search_results)} credible results. Verifying...'})}\n\n"
