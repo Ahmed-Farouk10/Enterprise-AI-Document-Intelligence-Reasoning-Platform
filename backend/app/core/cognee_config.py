@@ -25,6 +25,10 @@ class CogneeSettings(BaseSettings):
     # Processing options
     CHUNK_SIZE: int = 1024
     CHUNK_OVERLAP: int = 200
+
+    # Missing fields required by CogneeEngine
+    EXTRACTION_MODEL: str = "gpt-4o"
+    GRAPH_DATABASE_URL: str = os.getenv("GRAPH_DATABASE_URL", "bolt://localhost:7687")
     
     class Config:
         env_file = ".env"
