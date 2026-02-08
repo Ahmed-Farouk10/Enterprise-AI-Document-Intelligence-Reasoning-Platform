@@ -56,9 +56,10 @@ networkx>=3.1.0
 huggingface-hub>=0.20.0
 fastapi-users>=14.0.1
 fastembed>=0.6.0
-pydantic>=2.7.0
+pydantic-settings>=2.2.1
 greenlet>=3.0.0
 gunicorn>=21.2.0
+instructor>=1.0.0
 
 # Optional Dependencies often dragged in
 litellm>=1.0.0
