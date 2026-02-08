@@ -38,15 +38,19 @@ async def startup_event():
 
     # Warmup LLM Service (Load Model into Memory)
     from app.services.llm_service import llm_service
-    llm_service.warmup()
+    # Run warmup in a thread to avoid blocking the event loop
+    asyncio.create_task(asyncio.to_thread(llm_service.warmup))
 
     # Initialize Cognee Engine (Graph Database Connection)
-    try:
-        from app.services.cognee_engine import cognee_engine
-        await cognee_engine.initialize()
-        logger.info("application_startup", status="cognee_initialized")
-    except Exception as e:
-        logger.error("application_startup", status="cognee_initialization_failed", error=str(e))
+    async def init_cognee():
+        try:
+            from app.services.cognee_engine import cognee_engine
+            await cognee_engine.initialize()
+            logger.info("application_startup", status="cognee_initialized")
+        except Exception as e:
+            logger.error("application_startup", status="cognee_initialization_failed", error=str(e))
+    
+    asyncio.create_task(init_cognee())
 
 # CORS Configuration
 app.add_middleware(

@@ -165,7 +165,7 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                 )
                 self.model = AutoModelForCausalLM.from_pretrained(
                     self.model_name,
-                    torch_dtype=torch.float32,
+                    torch_dtype=torch.bfloat16 if torch.cuda.is_available() or torch.cpu.is_bf16_supported() else torch.float32,
                     low_cpu_mem_usage=True,
                     trust_remote_code=True
                 )
