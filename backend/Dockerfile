@@ -18,8 +18,12 @@ RUN apt-get update && apt-get install -y \
 
 # Create app directory and user for security
 RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app/uploads && \
+    mkdir -p /app/uploads /app/.cache && \
     chown -R appuser:appuser /app
+
+# Set environment variables for model caching
+ENV HF_HOME=/app/.cache
+ENV TRANSFORMERS_CACHE=/app/.cache
 
 # Copy requirements
 COPY requirements.txt .
@@ -32,8 +36,16 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Install remaining dependencies including Cognee
 RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
+# Pre-download the LLM and Embedding models to bake them into the image
+RUN python -c "from transformers import AutoTokenizer, AutoModelForCausalLM; \
+    from sentence_transformers import SentenceTransformer; \
+    llm_name = 'Qwen/Qwen2.5-1.5B-Instruct'; \
+    AutoTokenizer.from_pretrained(llm_name, trust_remote_code=True); \
+    AutoModelForCausalLM.from_pretrained(llm_name, trust_remote_code=True, low_cpu_mem_usage=True); \
+    SentenceTransformer('all-MiniLM-L6-v2')"
+
 # Copy application code
-ENV DEPLOY_TIMESTAMP=20240205_2330
+ENV DEPLOY_TIMESTAMP=20240206_1200
 COPY --chown=appuser:appuser . .
 
 # Switch to non-root user
