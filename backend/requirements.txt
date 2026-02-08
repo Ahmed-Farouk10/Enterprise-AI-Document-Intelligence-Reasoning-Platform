@@ -2,6 +2,7 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 pydantic>=2.5.0
+pydantic-settings>=2.2.1
 tenacity>=8.2.3
 
 # Document processing
@@ -9,13 +10,11 @@ pytesseract>=0.3.10
 pdfplumber>=0.10.0
 pillow>=10.1.0
 opencv-python-headless>=4.8.1.78
-
-# Word & Excel
 python-docx>=0.8.11
 openpyxl>=3.1.2
 pandas>=2.0.3
 
-# ML/DL
+# ML/DL (CPU optimized)
 torch>=2.3.0
 transformers>=4.40.0
 datasets>=2.19.0
@@ -33,7 +32,7 @@ psycopg2-binary>=2.9.9
 celery>=5.3.4
 redis>=5.0.1
 
-# Vector Database
+# Vector Database (Legacy support)
 qdrant-client>=1.7.0
 
 # Rate Limiting
@@ -46,22 +45,16 @@ python-json-logger>=2.0.7
 # Utilities
 numpy>=1.24.3
 tavily-python>=0.3.0
-tavily-python>=0.3.0
 ddgs>=0.1.0
+python-dotenv>=1.0.0
 
 # Graph RAG & Knowledge Graph
-# Cognee & Graph RAG (Pinned to Avoid Backtracking)
 cognee==0.5.2
 networkx>=3.1.0
 huggingface-hub>=0.20.0
 fastapi-users>=14.0.1
 fastembed>=0.6.0
-pydantic-settings>=2.2.1
 greenlet>=3.0.0
 gunicorn>=21.2.0
 instructor>=1.0.0
-
-# Optional Dependencies often dragged in
-litellm>=1.0.0
-instructor>=1.0.0
-# instructor>=0.5.2 # Cognee dependency often needed explicitly
+neo4j>=5.14.0
