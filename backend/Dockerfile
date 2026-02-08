@@ -16,36 +16,30 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app directory and user for security
+# Create app user and directories
 RUN useradd -m -u 1000 appuser && \
     mkdir -p /app/uploads /app/.cache && \
     chown -R appuser:appuser /app
 
-# Set environment variables for model caching
+# Set environment variables
 ENV HF_HOME=/app/.cache
 ENV TRANSFORMERS_CACHE=/app/.cache
+ENV PYTHONUNBUFFERED=1
 
 # Copy requirements
 COPY requirements.txt .
 
-# Upgrade pip and install huggingface_hub first for optimized downloads
+# Install dependencies in a single layer with CPU-specific torch
+# Using --prefer-binary to speed up build and avoid hung compilations
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir huggingface_hub[cli]
+    pip install --no-cache-dir torch==2.3.0 --extra-index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir --prefer-binary -r requirements.txt
 
-# Pre-download models using CLI (Much faster and more robust than python scripts)
-# Split into separate layers to cache huge models separately
-RUN huggingface-cli download Qwen/Qwen2.5-1.5B-Instruct --local-dir /app/.cache/hub/models--Qwen--Qwen2.5-1.5B-Instruct --local-dir-use-symlinks False
-RUN huggingface-cli download sentence-transformers/all-MiniLM-L6-v2 --local-dir /app/.cache/hub/models--sentence-transformers--all-MiniLM-L6-v2 --local-dir-use-symlinks False
+# Verify Cognee installation (Will fail build if missing)
+RUN python -c "import cognee; print('Cognee installed:', cognee.__version__)"
 
-# Install heavy ML dependencies with explicit CPU index
-RUN pip install --no-cache-dir torch==2.3.0 --extra-index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir transformers==4.40.0 sentence-transformers==3.0.0
-
-# Install remaining dependencies including Cognee
-RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
-
-# Copy application code (Uses .dockerignore to skip venv, caches, etc.)
-ENV DEPLOY_TIMESTAMP=20240208_1930
+# Copy application code
+ENV DEPLOY_TIMESTAMP=20240208_1945
 COPY --chown=appuser:appuser . .
 
 # Switch to non-root user
@@ -55,7 +49,7 @@ ENV PATH="/home/appuser/.local/bin:$PATH"
 # Expose port 7860
 EXPOSE 7860
 
-# Default command
+# Default command: Start Everything
 CMD redis-server --daemonize yes && \
     celery -A app.workers.celery_app worker --loglevel=info --concurrency=1 -D && \
     uvicorn "app.main:app" --host "0.0.0.0" --port "7860"
