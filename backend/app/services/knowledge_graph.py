@@ -10,12 +10,25 @@ logger = logging.getLogger(__name__)
 class KnowledgeGraphService:
     def __init__(self):
         self.initialized = False
-        # Ensure we have a data directory for Cognee
-        self.data_dir = os.path.join(os.getcwd(), "cognee_data")
-        os.makedirs(self.data_dir, exist_ok=True)
-        # Set Cognee configuration via environment variables or direct config if exposed
-        # cognee.config.data_root = self.data_dir # Pseudo-code, depends on library version
         
+        # 1. Ensure we have a writable data directory for Cognee
+        # In Docker/HF Spaces, current working directory is usually safe (/app)
+        self.data_dir = os.path.abspath(os.path.join(os.getcwd(), "cognee_data"))
+        os.makedirs(self.data_dir, exist_ok=True)
+        
+        # 2. Force Cognee to use this directory
+        # We set ALL possible environment variables to override default paths
+        os.environ["COGNEE_ROOT_DIR"] = self.data_dir
+        os.environ["COGNEE_DATABASE_PATH"] = os.path.join(self.data_dir, "cognee.db")
+        
+        # 3. Code-level override if possible (depends on library version)
+        try:
+            if hasattr(cognee, 'config'):
+                cognee.config.data_root = self.data_dir
+                logger.info(f"Set cognee.config.data_root to {self.data_dir}")
+        except Exception as e:
+            logger.warning(f"Could not set cognee.config.data_root: {e}")
+
     async def initialize(self):
         """Lazy initialization of Cognee resources if needed"""
         if self.initialized:
@@ -24,7 +37,7 @@ class KnowledgeGraphService:
             # Check if we need to run any startup logic
             # cognee.prune.prune_graph() # Optional cleanup
             self.initialized = True
-            logger.info("Cognee Knowledge Graph Service initialized.")
+            logger.info(f"Cognee Knowledge Graph Service initialized. Data Dir: {self.data_dir}")
         except Exception as e:
             logger.error(f"Failed to initialize Cognee: {e}")
 
