@@ -355,10 +355,11 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                 if retrieved_chunks or graph_results:
                     context = "\n\n".join([f"[{c['doc_name']}] {c['text']}" for c in retrieved_chunks])
                     
-                    if graph_results:
+                     if graph_results:
                          yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: traversing graph ({len(graph_results)} nodes found)...'})}\n\n"
                          graph_context = "\n".join([f"- {g['content']}" for g in graph_results])
-                         context += f"\n\nKNOWLEDGE GRAPH INSIGHTS:\n{graph_context}"
+                         # CRITICAL: Label graph data as BACKGROUND to prevent hallucination
+                         context += f"\n\nBACKGROUND KNOWLEDGE (ENTITIES & STANDARDS):\n{graph_context}\n(NOTE: This is general knowledge, NOT from the user's document.)"
 
                     # yield f"data: {json.dumps({'type': 'status', 'content': 'Reading context...'})}\n\n"
                     

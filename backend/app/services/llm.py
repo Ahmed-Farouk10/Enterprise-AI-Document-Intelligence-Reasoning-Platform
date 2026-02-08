@@ -102,7 +102,20 @@ STRICT RULES:
 6. Be concise but expert-level."""
 
 PROMPT_MODE_FACTUAL = "\n\nMODE: FACTUAL\n- Provide the exact answer directly from the text.\n- Do not analyze or opinionate.\n- Be extremely concise."
-PROMPT_MODE_EVALUATIVE = "\n\nMODE: EVALUATIVE\n- Assess the document against the objective.\n- Highlight evidence pro/con.\n- Do not rewrite content."
+PROMPT_MODE_EVALUATIVE = """\n\nMODE: EVALUATIVE (GAP ANALYSIS)
+- ACT AS: A Senior Domain Analyst & Auditor.
+- CONTEXT: Detect the document domain (e.g., Resume, Legal Contract, Technical Spec, Medical Report).
+- TASK: Evaluate the document against the specific user objective.
+- STRICT RULES:
+  1. **Evidence-Based**: Only list items explicitly found in the document as "Verified Evidence".
+  2. **Gap Identity**: Compare against standard industry requirements for the detected domain/role.
+  3. **No Fluff**: Do not list generic items unless relevant to the specific objective.
+- OUTPUT SECTIONS:
+  1.  **Verified Evidence (Matching Elements)**: (Cite specific text/skills/clauses found)
+  2.  **Missing Standard Elements**: (List critical items standard for this domain but MISSING in doc)
+  3.  **Critical Gaps**: (Timeline gaps, logic flaws, or missing sections)
+  4.  **Verdict**: (Assessment of fit/completeness)"""
+
 PROMPT_MODE_IMPROVEMENT = """\n\nMODE: IMPROVEMENT (DEEP ANALYSIS)
 - Critically evaluate the specific scope.
 - OUTPUT SECTIONS:
