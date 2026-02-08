@@ -104,9 +104,22 @@ def process_document_task(self, doc_id: str, file_path: str, mime_type: str, fil
             
             document.status = "completed"
             logger.info("document_processed_successfully", doc_id=doc_id, text_length=len(text))
-        else:
             document.status = "failed"
             logger.warning("no_text_extracted", doc_id=doc_id)
+        
+        # Add to Knowledge Graph (Cognee)
+        if text and len(text.strip()) > 50:
+            try:
+                import asyncio
+                from app.services.knowledge_graph import kg_service
+                
+                # Run async graph processing in this sync worker
+                # We use asyncio.run because this is a top-level task
+                asyncio.run(kg_service.add_document(content=text, doc_id=doc_id))
+                logger.info("document_added_to_knowledge_graph", doc_id=doc_id)
+            except Exception as kg_error:
+                # Log but don't fail the task if graph fails, it's an enhancement
+                logger.error("knowledge_graph_processing_failed", doc_id=doc_id, error=str(kg_error))
         
         # Update document in database
         self.session.commit()

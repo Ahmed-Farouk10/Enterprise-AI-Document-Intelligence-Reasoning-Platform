@@ -343,15 +343,28 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                     yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: searching local knowledge base...'})}\n\n"
                 
                 # Retrieve using the result from parallel execution
-                retrieved_chunks = vector_store.retrieve_with_citations(final_query, k=5 if depth == "IMPROVEMENT" else 3)
+                # Parallelize Vector Search and Graph Search
+                task_vector = loop.run_in_executor(None, lambda: vector_store.retrieve_with_citations(final_query, k=5 if depth == "IMPROVEMENT" else 3))
                 
-                if retrieved_chunks:
+                # Knowledge Graph Search (Reasoning Layer)
+                from app.services.knowledge_graph import kg_service
+                task_graph = kg_service.search_graph(final_query)
+                
+                retrieved_chunks, graph_results = await asyncio.gather(task_vector, task_graph)
+                
+                if retrieved_chunks or graph_results:
                     context = "\n\n".join([f"[{c['doc_name']}] {c['text']}" for c in retrieved_chunks])
+                    
+                    if graph_results:
+                         yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: traversing graph ({len(graph_results)} nodes found)...'})}\n\n"
+                         graph_context = "\n".join([f"- {g['content']}" for g in graph_results])
+                         context += f"\n\nKNOWLEDGE GRAPH INSIGHTS:\n{graph_context}"
+
                     # yield f"data: {json.dumps({'type': 'status', 'content': 'Reading context...'})}\n\n"
                     
                     document_context = {
-                        "document_name": retrieved_chunks[0]["doc_name"],
-                        "relevant_chunks": [c["text"][:200] + "..." for c in retrieved_chunks]
+                        "document_name": retrieved_chunks[0]["doc_name"] if retrieved_chunks else "Knowledge Graph",
+                        "relevant_chunks": [c["text"][:200] + "..." for c in retrieved_chunks] if retrieved_chunks else [g['content'][:200] for g in graph_results]
                     }
             
             # --- PHASE 13: LATENCY OPTIMIZATION ---

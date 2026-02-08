@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 PROMPT_INTENT_CLASSIFIER = """You are an intent classifier for a Resume Analysis AI.
 Classify the following user query into exactly ONE category:
 
-1. ATS_ESTIMATION: User asks for an ATS score, parse rate, or keyword match.
+1. ATS_ESTIMATION: User asks for an ATS score, parse rate, percentage, keywords, or compatibility grading.
 2. GAP_ANALYSIS: User asks about time gaps, employment breaks, or timeline issues.
 3. RESUME_ANALYSIS: User asks for general feedback, improvements, or critique of the resume.
 4. SEARCH_QUERY: User asks for EXTERNAL market data, salaries, or specific tech trends (requires web search).
@@ -23,6 +23,17 @@ Classify the following user query into exactly ONE category:
 Query: "{query}"
 
 Return ONLY the category name (e.g. ATS_ESTIMATION). Do not add any punctuation."""
+
+PROMPT_MODE_ATS = """\n\nMODE: ATS_SCORING
+- ACT AS: An Applicant Tracking System (ATS) Parser.
+- TASK: Evaluate the document for machine readability and keyword matching.
+- OUTPUT FORMAT:
+  1. **Estimated Match Score**: [0-100%] (Based on professional standards)
+  2. **Parsing Status**: [High/Medium/Low] quality
+  3. **Critical Issues**: (List formatting or structure errors)
+  4. **Missing Keywords**: (List industry standard terms missing from the text)
+  5. **Improvement Plan**: (3 bullet points to answer "how to improve")
+- RULE: Be strict. Simulating a machine parser."""
 
 PROMPT_QUERY_REWRITER = """{history_context}
 Current Query: "{original_query}"
@@ -339,7 +350,7 @@ class LLMService:
             if intent not in valid_intents:
                 # Basic keyword fallback
                 q = query.lower()
-                if "ats" in q or "score" in q: return "ATS_ESTIMATION"
+                if "ats" in q or "score" in q or "percentage" in q or "rate" in q or "grade" in q or "evaluate" in q: return "ATS_ESTIMATION"
                 if "gap" in q or "break" in q: return "GAP_ANALYSIS"
                 if "salary" in q or "market" in q: return "SEARCH_QUERY"
                 # If short query, assume general chat or follow up
@@ -430,7 +441,38 @@ class LLMService:
 
         # Intent-Specific Overrides (Legacy compatibility + nuance)
         if intent == "ATS_ESTIMATION":
-             base_prompt += "\n\nTASK: ATS Analysis. Focus on Keywords, Formatting, and Parseability."
+             # Dynamic Persona Selection
+             role = "Applicant Tracking System (ATS) Parser"
+             task = "Evaluate the document for machine readability and keyword matching"
+             context_type = "recruitment standards"
+             
+             q_lower = intent.lower() # Actually intent is just 'ATS_ESTIMATION', need validation from query? 
+             # Wait, I don't have query here. I need to pass query to get_task_prompt? 
+             # No, I can infer from scope or just make a generic parser. 
+             # Ah, the user wants "legal paper" to be evaluated.
+             # I need to detect the domain.
+             
+             # Let's check if the base prompt has injected info, or better, 
+             # I should pass 'query' to get_task_prompt. 
+             # But for now, I will use a generic "Compliance & Standards Engine" if it's not clearly a resume.
+             
+             # Actually, since I can't easily change the signature in all calls without checking usage,
+             # I will make the prompt ADAPTIVE to the content.
+             
+             base_prompt += """\n\nMODE: SCORING_EVALUATION
+- ACT AS: An Expert Auditor & Standards Compliance Engine.
+- CONTEXT: Detect the document domain (Resume, Legal, Technical, Medical).
+- TASK: Evaluate the document against its domain-specific standards.
+  - IF RESUME: Act as an ATS. Focus on keywords and formatting.
+  - IF LEGAL: Act as a Legal Compliance Officer. Focus on Egyptian Law & Statutes (if invoked).
+  - IF TECHNICAL: Act as a Senior Engineer. Focus on accuracy and feasibility.
+- OUTPUT FORMAT:
+  1. **Estimated Score**: [0-100%] (Based on domain integrity)
+  2. **Document Domain**: [Detected Domain]
+  3. **Critical Issues**: (Compliance or Format errors)
+  4. **Missing Elements**: (Standard clauses, keywords, or citations)
+  5. **Improvement Plan**: (3 specific improvements)
+- RULE: Be strict. Use the Search Results as the Ground Truth for laws/standards."""
         elif intent == "GAP_ANALYSIS":
              base_prompt += "\n\nTASK: Continuity Check. Identify significant date gaps (>3 months)."
         elif intent == "SEARCH_QUERY":
