@@ -46,3 +46,4 @@ fastapi-users>=14.0.1
 fastembed>=0.6.0
 greenlet>=3.0.0
 gunicorn>=21.2.0
+slowapi>=0.1.9
