@@ -1,50 +1,50 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
-pydantic==2.5.0
-tenacity==8.2.3
+fastapi>=0.110.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+pydantic>=2.5.0
+tenacity>=8.2.3
 
 # Document processing
-pytesseract==0.3.10
-pdfplumber==0.10.0
-pillow==10.1.0
-opencv-python-headless==4.8.1.78
+pytesseract>=0.3.10
+pdfplumber>=0.10.0
+pillow>=10.1.0
+opencv-python-headless>=4.8.1.78
 
 # Word & Excel
-python-docx==0.8.11
-openpyxl==3.1.2
-pandas==2.0.3
+python-docx>=0.8.11
+openpyxl>=3.1.2
+pandas>=2.0.3
 
 # ML/DL
 torch>=2.3.0
 transformers>=4.40.0
 datasets>=2.19.0
 sentence-transformers>=3.0.0
-faiss-cpu==1.7.4
-rank-bm25==0.2.2
-accelerate==0.24.0
+faiss-cpu>=1.7.4
+rank-bm25>=0.2.2
+accelerate>=0.24.0
 
 # Database
-sqlalchemy==2.0.23
-alembic==1.13.0
-psycopg2-binary==2.9.9
+sqlalchemy>=2.0.23
+alembic>=1.13.3
+psycopg2-binary>=2.9.9
 
 # Async Processing & Background Jobs
-celery==5.3.4
-redis==5.0.1
+celery>=5.3.4
+redis>=5.0.1
 
 # Vector Database
-qdrant-client==1.7.0
+qdrant-client>=1.7.0
 
 # Rate Limiting
-slowapi==0.1.9
+slowapi>=0.1.9
 
 # Structured Logging
-structlog==25.5.0
-python-json-logger==4.0.0
+structlog>=24.1.0
+python-json-logger>=2.0.7
 
 # Utilities
-numpy==1.24.3
+numpy>=1.24.3
 tavily-python>=0.3.0
 tavily-python>=0.3.0
 ddgs>=0.1.0
