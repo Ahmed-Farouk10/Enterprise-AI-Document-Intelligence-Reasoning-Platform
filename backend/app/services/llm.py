@@ -1,533 +1,607 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
+# app/services/llm_service.py
+import os
+import re
+import torch
 import logging
 import threading
-import time
-import os
-import torch
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Generator
+from dataclasses import dataclass
+from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
-# --- PRE-COMPILED PROMPTS (Phase 13 Optimization) ---
 
-PROMPT_INTENT_CLASSIFIER = """You are an intent classifier for a Resume Analysis AI.
-Classify the following user query into exactly ONE category:
+@dataclass
+class AnalysisConfig:
+    """Configuration for document analysis tasks"""
+    intent: str
+    depth: str  # FACTUAL, EVALUATIVE, IMPROVEMENT
+    scope: List[str]
+    allow_external_search: bool = False
+    require_citations: bool = True
 
-1. ATS_ESTIMATION: User asks for an ATS score, parse rate, percentage, keywords, or compatibility grading.
-2. GAP_ANALYSIS: User asks about time gaps, employment breaks, or timeline issues.
-3. RESUME_ANALYSIS: User asks for general feedback, improvements, or critique of the resume.
-4. SEARCH_QUERY: User asks for EXTERNAL market data, salaries, or specific tech trends (requires web search).
-5. GENERAL_CHAT: Greetings, clarification, or questions not about the resume.
-
-Query: "{query}"
-
-Return ONLY the category name (e.g. ATS_ESTIMATION). Do not add any punctuation."""
-
-PROMPT_MODE_ATS = """\n\nMODE: ATS_SCORING
-- ACT AS: An Applicant Tracking System (ATS) Parser.
-- TASK: Evaluate the document for machine readability and keyword matching.
-- OUTPUT FORMAT:
-  1. **Estimated Match Score**: [0-100%] (Based on professional standards)
-  2. **Parsing Status**: [High/Medium/Low] quality
-  3. **Critical Issues**: (List formatting or structure errors)
-  4. **Missing Keywords**: (List industry standard terms missing from the text)
-  5. **Improvement Plan**: (3 bullet points to answer "how to improve")
-- RULE: Be strict. Simulating a machine parser."""
-
-PROMPT_QUERY_REWRITER = """{history_context}
-Current Query: "{original_query}"
-
-Task: Rewrite the current query to be a standalone search query for a vector database.
-- Resolve pronouns (e.g., "it", "mine", "his") using the history.
-- If the user says "What about mine", and the history discusses "Ahmed's Resume", rewrite to "Ahmed's Resume".
-- Improve keywords for retrieval.
-- Do NOT answer the question. ONLY return the rewritten query string.
-
-Rewritten Query:"""
-
-PROMPT_DEPTH_CLASSIFIER = """SYSTEM:
-You are a reasoning depth controller for an Enterprise AI Document Intelligence Platform.
-
-Classify the user's request into EXACTLY ONE category:
-
-- FACTUAL: The user asks for specific information directly stated in the document.
-- EVALUATIVE: The user asks for assessment, comparison, or judgment WITHOUT asking to improve or rewrite.
-- IMPROVEMENT: The user explicitly asks to improve, optimize, rewrite, strengthen, or make the document better.
-
-RULES:
-- If the user does NOT explicitly request improvement, DO NOT select IMPROVEMENT.
-- Return ONLY the category name.
-
-USER QUERY:
-"{query}"
-"""
-
-PROMPT_SCOPE_DETECTOR = """SYSTEM:
-You are a document scope detector.
-From the user query, extract which parts of the document must be analyzed.
-
-Possible scopes (return ALL that apply):
-- WORK_HISTORY
-- EDUCATION
-- SKILLS
-- LEADERSHIP
-- ATS_COMPATIBILITY
-- FORMATTING
-- KEYWORDS
-- ROLE_FIT
-- ENTIRE_DOCUMENT
-
-RULES:
-- Only include scopes explicitly implied by the question.
-- Return a comma-separated list.
-- Do NOT explain.
-
-USER QUERY:
-"{query}"
-"""
-
-PROMPT_TASK_BASE = """You are an Enterprise Document Improvement Engine.
-
-DOCUMENT TYPE: Professional/Technical/Legal
-USER OBJECTIVE: {intent}
-ANALYSIS SCOPE: {scope_str}
-
-STRICT RULES:
-1. Use ONLY information explicitly present in the document when referring to the subject.
-2. If something is missing, say: "The document does not mention X."
-3. Use external benchmarks ONLY for standards (if requested), never as facts about the document.
-4. Stay strictly within the analysis scope ({scope_str}).
-5. Do NOT add sections not requested.
-6. Be concise but expert-level."""
-
-PROMPT_MODE_FACTUAL = "\n\nMODE: FACTUAL\n- Provide the exact answer directly from the text.\n- Do not analyze or opinionate.\n- Be extremely concise."
-PROMPT_MODE_EVALUATIVE = """\n\nMODE: EVALUATIVE (GAP ANALYSIS)
-- ACT AS: A Senior Domain Analyst & Auditor.
-- CONTEXT: Detect the document domain (e.g., Resume, Legal Contract, Technical Spec, Medical Report).
-- TASK: Evaluate the document against the specific user objective.
-- STRICT RULES:
-  1. **Evidence-Based**: Only list items explicitly found in the document as "Verified Evidence".
-  2. **Gap Identity**: Compare against standard industry requirements for the detected domain/role.
-  3. **No Fluff**: Do not list generic items unless relevant to the specific objective.
-- OUTPUT SECTIONS:
-  1.  **Verified Evidence (Matching Elements)**: (Cite specific text/skills/clauses found)
-  2.  **Missing Standard Elements**: (List critical items standard for this domain but MISSING in doc)
-  3.  **Critical Gaps**: (Timeline gaps, logic flaws, or missing sections)
-  4.  **Verdict**: (Assessment of fit/completeness)"""
-
-PROMPT_MODE_IMPROVEMENT = """\n\nMODE: IMPROVEMENT (DEEP ANALYSIS)
-- Critically evaluate the specific scope.
-- OUTPUT SECTIONS:
-  1. Issues Identified (Specific to scope)
-  2. Concrete Improvements (Actionable, specific changes)
-  3. Example Rewrite (Only for the section in scope)
-- Tone: Professional, Senior Reviewer, No Fluff."""
-
-# --------------------------------------------------------
 
 class LLMService:
+    """
+    Enterprise Document Intelligence Engine.
+    
+    Core Principles:
+    1. Document is ground truth - no hallucination permitted
+    2. Intent-driven prompt selection - single source of truth
+    3. Evidence-gated generation - no output without context
+    4. Deterministic scoring - LLM explains, doesn't score arbitrarily
+    """
+    
+    # Intent Constants
+    INTENT_SUMMARY = "SUMMARY"
+    INTENT_FACTUAL = "FACTUAL"
+    INTENT_EVALUATIVE = "EVALUATIVE"
+    INTENT_IMPROVEMENT = "IMPROVEMENT"
+    INTENT_GAP_ANALYSIS = "GAP_ANALYSIS"
+    INTENT_SCORING = "SCORING"
+    INTENT_SEARCH = "SEARCH_QUERY"
+    INTENT_GENERAL = "GENERAL_CHAT"
+    
+    # Depth Constants
+    DEPTH_FACTUAL = "FACTUAL"
+    DEPTH_EVALUATIVE = "EVALUATIVE"
+    DEPTH_IMPROVEMENT = "IMPROVEMENT"
+    
     def __init__(self):
-        # Upgrade to Qwen2.5-1.5B-Instruct (SOTA for <3B params)
         self.model_name = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
-        self.tokenizer = None
-        self.model = None
+        self.tokenizer: Optional[AutoTokenizer] = None
+        self.model: Optional[AutoModelForCausalLM] = None
+        self._model_lock = threading.Lock()
         
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def load_model(self):
-        """Lazy load the model with retries"""
-        if self.model is not None:
-            return
-
-        logger.info(f"Loading LLM ({self.model_name})...")
+        # Pre-compiled prompt templates (Phase 13 optimization)
+        self._prompts = self._compile_prompts()
         
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name, 
-                dtype=torch.float32, 
-                low_cpu_mem_usage=True
-            )
-            logger.info("LLM loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load LLM: {e}")
-            raise e
+    def _compile_prompts(self) -> Dict[str, str]:
+        """Compile all system prompts for consistency"""
+        return {
+            "base_persona": """You are an Enterprise Document Intelligence Engine.
 
-    def _ensure_model_loaded(self):
+ABSOLUTE RULES (VIOLATION PROHIBITED):
+1. SOURCE TRUTH: Use ONLY information explicitly present in the provided document.
+2. MISSING DATA: If information is absent, state exactly: "The document does not mention [X]."
+3. NO INFERENCE: Never assume, infer, or extrapolate beyond explicit text.
+4. NO EXTERNAL: Do not use training data or external knowledge unless explicitly flagged as [EXTERNAL].
+5. CITATION: Every claim must reference specific document sections/evidence.
+6. SCOPE BOUNDARY: Analyze ONLY within the specified scope sections.
+
+DOCUMENT TYPE: Generic (Auto-detected: Resume, Legal, Technical, Medical, Academic)
+""",
+            
+            "factual_mode": """
+MODE: FACTUAL EXTRACTION
+TASK: Extract specific information directly stated in the document.
+OUTPUT RULES:
+- Provide exact quotes or close paraphrases with citations.
+- If not found: "The document does not mention this information."
+- No analysis, no judgment, no recommendations.
+""",
+            
+            "evaluative_mode": """
+MODE: EVALUATIVE ANALYSIS
+TASK: Assess document quality, completeness, or fit against standards.
+OUTPUT STRUCTURE:
+1. VERIFIED EVIDENCE: (Items explicitly found in document with citations)
+2. MISSING STANDARD ELEMENTS: (Critical items standard for domain but absent)
+3. CRITICAL GAPS: (Logical inconsistencies, timeline issues, structural problems)
+4. VERDICT: (Evidence-based assessment only)
+
+RULE: Do not invent standards. Use only domain-typical expectations.
+""",
+            
+            "improvement_mode": """
+MODE: IMPROVEMENT & OPTIMIZATION
+TASK: Provide specific, actionable improvements to the document.
+OUTPUT STRUCTURE:
+1. ISSUES IDENTIFIED: (Specific problems with evidence citations)
+2. CONCRETE IMPROVEMENTS: (Actionable changes, not generic advice)
+3. EXAMPLE REWRITE: (Specific section improvement, if applicable)
+
+RULE: All suggestions must be grounded in document content. No generic templates.
+""",
+            
+            "gap_analysis_mode": """
+MODE: TEMPORAL & INFORMATIONAL GAP ANALYSIS
+TASK: Identify significant gaps in timelines or missing critical information.
+GAP CRITERIA:
+- Employment gaps: >3 months without overlapping education/projects
+- Missing sections: Standard for document type but absent
+- Logical gaps: Inconsistent dates, missing prerequisites
+
+OUTPUT:
+- List each gap with specific date ranges or section references
+- Note: "No significant gaps detected" only if document is complete
+""",
+            
+            "scoring_mode": """
+MODE: STRUCTURED SCORING
+TASK: Provide numerical evaluation based on explicit document criteria.
+
+SCORING METHODOLOGY:
+1. Identify measurable criteria present in document
+2. Count/verify each criterion against evidence
+3. Calculate: (Met Criteria / Total Criteria) × 100
+
+OUTPUT FORMAT:
+- Score: [X]% (calculation shown)
+- Criteria Breakdown: (List with evidence)
+- Missing: (Unscored due to absent data)
+- Confidence: (High/Medium/Low based on document completeness)
+
+WARNING: If document lacks measurable criteria, return "Scoring not possible - insufficient quantitative data."
+""",
+            
+            "search_integration": """
+EXTERNAL SEARCH INTEGRATION:
+The following [EXTERNAL] information was retrieved to provide benchmarks.
+EXTERNAL data is for context only - never treated as document fact.
+Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
+"""
+        }
+
+    # ==================== MODEL LIFECYCLE ====================
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        reraise=True
+    )
+    def load_model(self) -> None:
+        """Thread-safe model loading with retry logic"""
+        with self._model_lock:
+            if self.model is not None:
+                return
+                
+            logger.info(f"Loading LLM: {self.model_name}")
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_name,
+                    trust_remote_code=True
+                )
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name,
+                    torch_dtype=torch.float32,
+                    low_cpu_mem_usage=True,
+                    trust_remote_code=True
+                )
+                logger.info("LLM loaded successfully")
+            except Exception as e:
+                logger.error(f"Model loading failed: {e}")
+                raise
+
+    def _ensure_loaded(self) -> None:
+        """Lazy loading wrapper"""
         if self.model is None:
-            logger.info(f"Model not loaded. Loading now... (PID: {os.getpid()})")
             self.load_model()
-        else:
-            logger.debug(f"Model already loaded (PID: {os.getpid()})")
 
-    def warmup(self):
-        """Warmup the model by loading it into memory"""
-        logger.info("Warming up LLM Service...")
-        self._ensure_model_loaded()
-        logger.info("LLM Service ready.")
+    def warmup(self) -> None:
+        """Eager loading for production deployment"""
+        self._ensure_loaded()
+        logger.info("LLM Service warmed up and ready")
 
-    def _run_inference(self, messages: list, max_new_tokens: int = 512, temperature: float = 0.4) -> str:
-        """Helper to run model generation using chat templates"""
-        self._ensure_model_loaded()
-        
-        # Proper chat template handling
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
-        
-        inputs = self.tokenizer(
-            text, 
-            return_tensors="pt", 
-            truncation=True,
-            max_length=4096 # Large context for Qwen
-        )
-        
-        outputs = self.model.generate(
-            inputs.input_ids, 
-            attention_mask=inputs.attention_mask,
-            max_new_tokens=max_new_tokens,
-            do_sample=True,
-            temperature=temperature,
-            top_p=0.9,
-            repetition_penalty=1.1,
-            max_time=90.0
-        )
-        
-        # Decode only the new tokens
-        return self.tokenizer.decode(outputs[0][len(inputs.input_ids[0]):], skip_special_tokens=True)
-
-    def generate_search_query(self, user_query: str, context: str = "") -> str:
+    # ==================== INTENT & SCOPE CLASSIFICATION ====================
+    
+    def classify_intent(self, query: str) -> str:
         """
-        Generate a precise, keyword-optimized web search query.
-        Output is GUARANTEED to be a single clean query string.
+        Deterministic intent classification with keyword fallback.
+        Returns stable intent categories for routing.
         """
-        self._ensure_model_loaded()
+        q = query.lower().strip()
+        
+        # Direct pattern matching (deterministic layer)
+        if any(k in q for k in ["summarize", "summary", "tldr", "overview"]):
+            return self.INTENT_SUMMARY
+            
+        if any(k in q for k in ["score", "percentage", "rate", "grade", "percent", "ats"]):
+            return self.INTENT_SCORING
+            
+        if any(k in q for k in ["gap", "break", "missing time", "unemployed", "between jobs"]):
+            return self.INTENT_GAP_ANALYSIS
+            
+        if any(k in q for k in ["improve", "rewrite", "enhance", "optimize", "better", "fix"]):
+            return self.INTENT_IMPROVEMENT
+            
+        if any(k in q for k in ["evaluate", "assess", "fit", "suitable", "good for", "compare"]):
+            return self.INTENT_EVALUATIVE
+            
+        if any(k in q for k in ["salary", "market", "industry standard", "trend", "news", "external"]):
+            return self.INTENT_SEARCH
+            
+        if any(k in q for k in ["what is", "when did", "where", "who", "how many", "list"]):
+            return self.INTENT_FACTUAL
+            
+        if len(q.split()) < 4:
+            return self.INTENT_GENERAL
+            
+        return self.INTENT_EVALUATIVE  # Default for complex queries
 
-        messages = [
+    def classify_depth(self, query: str) -> str:
+        """
+        Classify required reasoning depth.
+        IMPROVEMENT = generative rewriting (highest risk, needs guardrails)
+        """
+        q = query.lower()
+        
+        improvement_keywords = [
+            "improve", "rewrite", "write", "draft", "create", "generate",
+            "enhance", "optimize", "polish", "refine", "make better"
+        ]
+        
+        if any(k in q for k in improvement_keywords):
+            return self.DEPTH_IMPROVEMENT
+            
+        evaluative_keywords = [
+            "evaluate", "assess", "analyze", "review", "critique",
+            "fit", "suitable", "recommend", "suggestion"
+        ]
+        
+        if any(k in q for k in evaluative_keywords):
+            return self.DEPTH_EVALUATIVE
+            
+        return self.DEPTH_FACTUAL
+
+    def detect_scope(self, query: str) -> List[str]:
+        """
+        Detect which document sections are relevant.
+        Returns list of scope identifiers.
+        """
+        q = query.lower()
+        scopes = []
+        
+        # Temporal/Experience scopes
+        if any(k in q for k in ["work", "job", "experience", "employment", "career", "position"]):
+            scopes.append("WORK_HISTORY")
+            
+        if any(k in q for k in ["education", "degree", "university", "college", "school", "graduated"]):
+            scopes.append("EDUCATION")
+            
+        if any(k in q for k in ["skill", "technology", "tool", "language", "framework", "proficiency"]):
+            scopes.append("SKILLS")
+            
+        if any(k in q for k in ["project", "portfolio", "achievement", "accomplishment"]):
+            scopes.append("PROJECTS")
+            
+        if any(k in q for k in ["certification", "certificate", "license", "accreditation"]):
+            scopes.append("CERTIFICATIONS")
+            
+        if any(k in q for k in ["leadership", "managed", "led", "team", "supervised"]):
+            scopes.append("LEADERSHIP")
+            
+        # Document quality scopes
+        if any(k in q for k in ["format", "layout", "structure", "template", "design"]):
+            scopes.append("FORMATTING")
+            
+        if any(k in q for k in ["keyword", "ats", "parse", "machine readable"]):
+            scopes.append("ATS_COMPATIBILITY")
+            
+        if not scopes:
+            scopes.append("ENTIRE_DOCUMENT")
+            
+        return scopes
+
+    def extract_scope_context(self, full_document: str, scopes: List[str]) -> str:
+        """
+        Extract relevant sections from document based on scope.
+        This is the CRITICAL anti-hallucination filter.
+        """
+        if "ENTIRE_DOCUMENT" in scopes or not scopes:
+            return full_document
+            
+        # Simple section extraction (can be enhanced with NLP)
+        sections = []
+        lines = full_document.split('\n')
+        current_section = "GENERAL"
+        section_buffer = []
+        
+        section_keywords = {
+            "WORK_HISTORY": ["experience", "employment", "work history", "professional experience", "career"],
+            "EDUCATION": ["education", "academic", "degree", "university", "qualification"],
+            "SKILLS": ["skills", "technologies", "competencies", "proficiencies", "expertise"],
+            "PROJECTS": ["projects", "portfolio", "accomplishments"],
+            "CERTIFICATIONS": ["certifications", "certificates", "licenses"],
+            "LEADERSHIP": ["leadership", "management", "supervision"]
+        }
+        
+        for line in lines:
+            line_lower = line.lower().strip()
+            
+            # Detect section headers
+            detected_section = None
+            for scope, keywords in section_keywords.items():
+                if any(kw in line_lower for kw in keywords) and len(line) < 100:  # Likely header
+                    detected_section = scope
+                    break
+                    
+            if detected_section:
+                # Save previous section if it was in scope
+                if current_section in scopes and section_buffer:
+                    sections.append(f"\n=== {current_section} ===\n" + '\n'.join(section_buffer))
+                current_section = detected_section
+                section_buffer = []
+            else:
+                section_buffer.append(line)
+                
+        # Don't forget last section
+        if current_section in scopes and section_buffer:
+            sections.append(f"\n=== {current_section} ===\n" + '\n'.join(section_buffer))
+            
+        return '\n'.join(sections) if sections else full_document
+
+    # ==================== PROMPT BUILDING ====================
+    
+    def build_system_prompt(self, config: AnalysisConfig) -> str:
+        """
+        Build the complete system prompt from config.
+        SINGLE SOURCE OF TRUTH - no other prompts allowed in generation.
+        """
+        parts = [self._prompts["base_persona"]]
+        
+        # Add mode-specific instructions
+        if config.depth == self.DEPTH_FACTUAL:
+            parts.append(self._prompts["factual_mode"])
+        elif config.depth == self.DEPTH_EVALUATIVE:
+            parts.append(self._prompts["evaluative_mode"])
+        elif config.depth == self.DEPTH_IMPROVEMENT:
+            parts.append(self._prompts["improvement_mode"])
+            
+        # Add intent-specific overrides
+        if config.intent == self.INTENT_GAP_ANALYSIS:
+            parts.append(self._prompts["gap_analysis_mode"])
+        elif config.intent == self.INTENT_SCORING:
+            parts.append(self._prompts["scoring_mode"])
+            
+        # Add search integration notice if external data present
+        if config.allow_external_search:
+            parts.append(self._prompts["search_integration"])
+            
+        # Inject scope constraint
+        scope_str = ", ".join(config.scope)
+        parts.append(f"\nANALYSIS SCOPE: {scope_str}\n")
+        
+        # Add citation requirement
+        if config.require_citations:
+            parts.append("CITATION FORMAT: Use [Section: X] or [Line: Y] for every claim.\n")
+            
+        return "\n".join(parts)
+
+    # ==================== CORE GENERATION ====================
+    
+    def _prepare_messages(
+        self, 
+        system_prompt: str, 
+        context: str, 
+        question: str
+    ) -> List[Dict[str, str]]:
+        """Prepare message list for chat template"""
+        return [
+            {"role": "system", "content": system_prompt},
             {
-                "role": "system",
-                "content": (
-                    "You are an enterprise-grade search query generator.\\n"
-                    "Your output feeds directly into an automated search engine.\\n\\n"
-                    "RULES:\\n"
-                    "- Output ONE single-line search query\\n"
-                    "- NO explanations\\n"
-                    "- NO prefixes or labels\\n"
-                    "- NO punctuation except hyphens\\n"
-                    "- Focus on standards benchmarks definitions\\n"
-                    "- Use professional technical keywords only"
-                )
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"User Question: {user_query}\\n"
-                    f"Domain Context: {context[:200]}"
-                )
+                "role": "user", 
+                "content": f"DOCUMENT CONTEXT:\n{context}\n\nUSER QUESTION:\n{question}"
             }
         ]
 
+    def generate(
+        self,
+        system_prompt: str,
+        document_context: str,
+        question: str,
+        max_new_tokens: int = 1024,
+        temperature: float = 0.2
+    ) -> str:
+        """
+        Synchronous generation with full safety controls.
+        Use for: ATS scoring, gap analysis, short answers.
+        """
+        self._ensure_loaded()
+        
+        messages = self._prepare_messages(system_prompt, document_context, question)
+        
+        # Apply chat template
         text = self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=True
         )
-
-        inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=2048)
-
-        outputs = self.model.generate(
-            **inputs,
-            max_new_tokens=24,
-            do_sample=False,          # ← Deterministic for search
-            temperature=0.0,
-            repetition_penalty=1.05
-        )
-
-        raw_query = self.tokenizer.decode(
-            outputs[0][len(inputs.input_ids[0]):],
-            skip_special_tokens=True
-        )
-
-        # Final hard sanitation layer (never trust the model blindly)
-        query = (
-            raw_query
-            .replace("\\n", " ")
-            .replace('"', "")
-            .strip()
-            .lower()
-        )
-
-        logger.info(f"Search Query Generated: {query}")
-        return query
-
-    def stream_inference(self, message: str, context: str = ""):
-        """
-        Enterprise-grade streaming response with lifecycle signaling
-        and strict reasoning discipline.
-        """
-        self._ensure_model_loaded()
-
-        if not context or len(context.strip()) < 10:
-            system_prompt = (
-                "You are an expert AI assistant.\\n"
-                "No internal documents were found.\\n"
-                "Answer confidently using general professional knowledge.\\n"
-                "Clearly indicate when reasoning is based on general knowledge."
-            )
-            user_prompt = f"Question:\\n{message}"
-        else:
-            system_prompt = (
-                "You are an Enterprise AI Document Intelligence Analyst.\\n\\n"
-                "DOCUMENT RULES:\\n"
-                "- Local documents are ground truth\\n"
-                "- External knowledge is for benchmarks only\\n"
-                "- Never mix the two implicitly\\n"
-                "- Explicitly state when information is missing\\n"
-                "- Maintain professional, confident tone"
-            )
-            user_prompt = f"Context:\\n{context}\\n\\nQuestion:\\n{message}"
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
-
+        
         inputs = self.tokenizer(
             text,
             return_tensors="pt",
             truncation=True,
-            max_length=16384  # Up from 8192 to handle large resumes + RAG context
+            max_length=8192
         )
+        
+        outputs = self.model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=temperature > 0,
+            temperature=temperature,
+            top_p=0.9 if temperature > 0 else 1.0,
+            repetition_penalty=1.15,
+            pad_token_id=self.tokenizer.eos_token_id
+        )
+        
+        response = self.tokenizer.decode(
+            outputs[0][len(inputs.input_ids[0]):],
+            skip_special_tokens=True
+        )
+        
+        return response.strip()
 
+    def generate_stream(
+        self,
+        system_prompt: str,
+        document_context: str,
+        question: str,
+        max_new_tokens: int = 2048,
+        temperature: float = 0.25
+    ) -> Generator[str, None, None]:
+        """
+        Streaming generation for UX responsiveness.
+        Use for: Long-form analysis, improvement suggestions.
+        """
+        self._ensure_loaded()
+        
+        messages = self._prepare_messages(system_prompt, document_context, question)
+        
+        text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        
+        inputs = self.tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=16384  # Large context for long documents
+        )
+        
         streamer = TextIteratorStreamer(
             self.tokenizer,
             skip_special_tokens=True,
             skip_prompt=True
         )
-
+        
         generation_kwargs = dict(
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
             streamer=streamer,
-            max_new_tokens=4096,      # Up from 2048 to support deep analysis (e.g. detailed rewrites)
+            max_new_tokens=max_new_tokens,
             do_sample=True,
-            temperature=0.25,         # keep it low for factual streaming
+            temperature=temperature,
             repetition_penalty=1.1,
-            max_time=180.0            # Increased timeout to match chat.py
+            pad_token_id=self.tokenizer.eos_token_id
         )
-
-        def _generate():
-            try:
-                self.model.generate(**generation_kwargs)
-            except Exception as e:
-                logger.error(f"Streaming generation failed: {e}")
-
-        thread = threading.Thread(target=_generate, daemon=True)
+        
+        # Run generation in background thread
+        thread = threading.Thread(
+            target=self.model.generate,
+            kwargs=generation_kwargs,
+            daemon=True
+        )
         thread.start()
-
-        # Stream lifecycle signaling (frontend gold)
-        yield "[STREAM_START]\\n"
-
+        
+        # Stream with lifecycle markers
+        yield "[STREAM_START]\n"
+        
         for token in streamer:
             yield token
+            
+        yield "\n[STREAM_END]"
+        
+        thread.join(timeout=1.0)
 
-        yield "\\n[STREAM_END]"
-
-    def classify_intent(self, query: str) -> str:
+    # ==================== SPECIALIZED METHODS ====================
+    
+    def generate_search_query(self, user_query: str, document_summary: str = "") -> str:
         """
-        Classifies the user query into a specific task intent.
-        Returns: 'ATS_ESTIMATION', 'GAP_ANALYSIS', 'RESUME_ANALYSIS', 'GENERAL_CHAT', or 'SEARCH_QUERY'
+        Generate optimized search query for external data.
+        Deterministic, keyword-focused output.
         """
-        prompt = PROMPT_INTENT_CLASSIFIER.format(query=query)
+        self._ensure_loaded()
         
         messages = [
-            {"role": "system", "content": "You are a precise intent classifier."},
-            {"role": "user", "content": prompt}
+            {
+                "role": "system",
+                "content": (
+                    "Generate a precise web search query. "
+                    "Output ONLY the query string. No explanations. "
+                    "Focus on: industry standards, benchmarks, definitions. "
+                    "Max 10 words."
+                )
+            },
+            {
+                "role": "user",
+                "content": f"User Question: {user_query}\nDocument Context: {document_summary[:200]}"
+            }
+        ]
+        
+        text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        
+        inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
+        
+        outputs = self.model.generate(
+            **inputs,
+            max_new_tokens=20,
+            do_sample=False,  # Deterministic
+            temperature=0.0
+        )
+        
+        query = self.tokenizer.decode(
+            outputs[0][len(inputs.input_ids[0]):],
+            skip_special_tokens=True
+        )
+        
+        # Hard sanitation
+        query = query.replace('"', '').replace("'", "").strip().lower()
+        query = re.sub(r'\s+', ' ', query)
+        
+        return query[:100]  # Hard limit
+
+    def verify_evidence(self, claim: str, context: str) -> Dict[str, Any]:
+        """
+        Self-RAG: Verify if claim is supported by context.
+        Returns verification result with confidence.
+        """
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Verify if the CLAIM is fully supported by the CONTEXT. "
+                    "Answer ONLY: 'VERIFIED', 'PARTIAL', or 'UNSUPPORTED'. "
+                    "Then explain in one sentence."
+                )
+            },
+            {
+                "role": "user",
+                "content": f"CONTEXT:\n{context}\n\nCLAIM:\n{claim}"
+            }
         ]
         
         try:
-            # Quick inference for classification
-            intent = self._run_inference(messages, max_new_tokens=10)
-            intent = intent.strip().upper()
+            response = self.generate(
+                system_prompt=messages[0]["content"],
+                document_context=context,
+                question=f"Verify this claim: {claim}",
+                max_new_tokens=50,
+                temperature=0.0
+            )
             
-            # Fallback for hallway hallucinations
-            valid_intents = {"ATS_ESTIMATION", "GAP_ANALYSIS", "RESUME_ANALYSIS", "SEARCH_QUERY", "GENERAL_CHAT"}
-            if intent not in valid_intents:
-                # Basic keyword fallback
-                q = query.lower()
-                if "ats" in q or "score" in q or "percentage" in q or "rate" in q or "grade" in q or "evaluate" in q: return "ATS_ESTIMATION"
-                if "gap" in q or "break" in q: return "GAP_ANALYSIS"
-                if "salary" in q or "market" in q: return "SEARCH_QUERY"
-                # If short query, assume general chat or follow up
-                if len(query.split()) < 3: return "GENERAL_CHAT"
-                return "RESUME_ANALYSIS"
+            result = "UNSUPPORTED"
+            if "verified" in response.lower():
+                result = "VERIFIED"
+            elif "partial" in response.lower():
+                result = "PARTIAL"
                 
-            return intent
+            return {
+                "status": result,
+                "explanation": response,
+                "claim": claim
+            }
         except Exception as e:
-            logger.error(f"Intent classification failed: {e}")
-            return "RESUME_ANALYSIS"
+            logger.error(f"Evidence verification failed: {e}")
+            return {"status": "ERROR", "explanation": str(e), "claim": claim}
 
-    def rewrite_query(self, original_query: str, chat_history: List[dict] = None) -> str:
-        """
-        Rewrite the query to be self-contained for vector retrieval, using chat history for context.
-        """
-        if not chat_history:
-            chat_history = []
-            
-        # Format history for context (last 3 turns)
-        history_context = ""
-        if chat_history:
-            # Filter out system messages and large context blocks if stored
-            recent_history = [m for m in chat_history if m['role'] in ('user', 'assistant')][-3:]
-            # Helper to truncate content
-            def trunc(s): return s[:200] + "..." if len(s) > 200 else s
-            history_text = "\n".join([f"{msg['role']}: {trunc(msg['content'])}" for msg in recent_history])
-            history_context = f"Conversation History:\n{history_text}\n"
+    # ==================== UTILITY ====================
+    
+    def get_service_health(self) -> Dict[str, Any]:
+        """Health check for monitoring"""
+        return {
+            "status": "healthy" if self.model else "uninitialized",
+            "model_name": self.model_name,
+            "loaded": self.model is not None
+        }
 
-        prompt = PROMPT_QUERY_REWRITER.format(history_context=history_context, original_query=original_query)
-        
-        messages = [
-            {"role": "system", "content": "You are a query rewriting engine. output ONLY the rewritten query."},
-            {"role": "user", "content": prompt}
-        ]
-        
-        try:
-            response = self._run_inference(messages, max_new_tokens=64)
-            return response.strip().replace('"', '')
-        except Exception:
-            return original_query
 
-    def classify_depth(self, query: str) -> str:
-        """
-        Classifies the reasoning depth required for the query.
-        Returns: FACTUAL | EVALUATIVE | IMPROVEMENT
-        """
-        prompt = PROMPT_DEPTH_CLASSIFIER.format(query=query)
-        try:
-            response = self._run_inference([{"role": "user", "content": prompt}], max_new_tokens=10)
-            cleaned = response.strip().upper()
-            if "IMPROVEMENT" in cleaned: return "IMPROVEMENT"
-            if "EVALUATIVE" in cleaned: return "EVALUATIVE"
-            return "FACTUAL"
-        except Exception:
-            return "EVALUATIVE"
-
-    def detect_scope(self, query: str) -> List[str]:
-        """
-        Detects the specific scope/sections of the document to analyze.
-        """
-        prompt = PROMPT_SCOPE_DETECTOR.format(query=query)
-        try:
-            response = self._run_inference([{"role": "user", "content": prompt}], max_new_tokens=20)
-            return [s.strip() for s in response.split(",") if s.strip()]
-        except Exception:
-            return ["ENTIRE_DOCUMENT"]
-
-    def get_task_prompt(self, intent: str, depth: str = "EVALUATIVE", scope: List[str] = None) -> str:
-        """
-        Returns the specialized system prompt based on Intent, Depth, and Scope.
-        Phase 12: Controlled Deep Improvement.
-        """
-        if scope is None:
-            scope = ["ENTIRE_DOCUMENT"]
-            
-        scope_str = ", ".join(scope)
-        
-        # Base Persona
-        base_prompt = PROMPT_TASK_BASE.format(intent=intent, scope_str=scope_str)
-
-        # Depth-Specific Instructions
-        if depth == "FACTUAL":
-            base_prompt += PROMPT_MODE_FACTUAL
-        elif depth == "EVALUATIVE":
-            base_prompt += PROMPT_MODE_EVALUATIVE
-        elif depth == "IMPROVEMENT":
-            base_prompt += PROMPT_MODE_IMPROVEMENT
-
-        # Intent-Specific Overrides (Legacy compatibility + nuance)
-        if intent == "ATS_ESTIMATION":
-             # Dynamic Persona Selection
-             role = "Applicant Tracking System (ATS) Parser"
-             task = "Evaluate the document for machine readability and keyword matching"
-             context_type = "recruitment standards"
-             
-             q_lower = intent.lower() # Actually intent is just 'ATS_ESTIMATION', need validation from query? 
-             # Wait, I don't have query here. I need to pass query to get_task_prompt? 
-             # No, I can infer from scope or just make a generic parser. 
-             # Ah, the user wants "legal paper" to be evaluated.
-             # I need to detect the domain.
-             
-             # Let's check if the base prompt has injected info, or better, 
-             # I should pass 'query' to get_task_prompt. 
-             # But for now, I will use a generic "Compliance & Standards Engine" if it's not clearly a resume.
-             
-             # Actually, since I can't easily change the signature in all calls without checking usage,
-             # I will make the prompt ADAPTIVE to the content.
-             
-             base_prompt += """\n\nMODE: SCORING_EVALUATION
-- ACT AS: An Expert Auditor & Standards Compliance Engine.
-- CONTEXT: Detect the document domain (Resume, Legal, Technical, Medical).
-- TASK: Evaluate the document against its domain-specific standards.
-  - IF RESUME: Act as an ATS. Focus on keywords and formatting.
-  - IF LEGAL: Act as a Legal Compliance Officer. Focus on Egyptian Law & Statutes (if invoked).
-  - IF TECHNICAL: Act as a Senior Engineer. Focus on accuracy and feasibility.
-- OUTPUT FORMAT:
-  1. **Estimated Score**: [0-100%] (Based on domain integrity)
-  2. **Document Domain**: [Detected Domain]
-  3. **Critical Issues**: (Compliance or Format errors)
-  4. **Missing Elements**: (Standard clauses, keywords, or citations)
-  5. **Improvement Plan**: (3 specific improvements)
-- RULE: Be strict. Use the Search Results as the Ground Truth for laws/standards."""
-        elif intent == "GAP_ANALYSIS":
-             base_prompt += "\n\nTASK: Continuity Check. Identify significant date gaps (>3 months)."
-        elif intent == "SEARCH_QUERY":
-             base_prompt += "\n\nTASK: External Search Integration. Clearly separate external findings from document facts."
-
-        return base_prompt
-
-    def grade_relevance(self, context: str, question: str) -> bool:
-        """
-        Self-RAG Step 1: Retrieval Grading
-        """
-        messages = [
-            {"role": "system", "content": "You are a relevance grader. Determine if the context is relevant to the question. Answer only 'yes' or 'no'."},
-            {"role": "user", "content": f"Question: {question}\n\nContext: {context}"}
-        ]
-        
-        response = self._run_inference(messages, max_new_tokens=10, temperature=0.1)
-        return "yes" in response.lower()
-
-    def grade_hallucination(self, context: str, answer: str) -> bool:
-        """
-        Self-RAG Step 2: Critique Token
-        """
-        messages = [
-            {"role": "system", "content": "You are a fact checker. Determine if the answer is fully supported by the context. Answer only 'yes' or 'no'."},
-            {"role": "user", "content": f"Context: {context}\n\nAnswer: {answer}"}
-        ]
-        
-        response = self._run_inference(messages, max_new_tokens=10, temperature=0.1)
-        return "yes" in response.lower()
-
-    def generate_answer(self, context: str, question: str) -> str:
-        """Standard generation"""
-        messages = [
-            {"role": "system", "content": "You are a senior document analyst. "
-             "Analyze the provided context holistically. "
-             "When evaluating timelines (work history, education), pay close attention to overlapping dates. "
-             "Do not assume gaps exist if education or other activities cover the period. "
-             "Answer in detailed bullet points."},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{question}"}
-        ]
-        return self._run_inference(messages, max_new_tokens=1024)
-
-# Singleton
+# Singleton instance
 llm_service = LLMService()

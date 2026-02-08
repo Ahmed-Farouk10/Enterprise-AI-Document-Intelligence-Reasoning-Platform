@@ -1,75 +1,93 @@
-from fastapi import APIRouter, HTTPException, Depends, Request, Response
-from sqlalchemy.orm import Session
-from typing import List
+# app/api/chat.py
 import asyncio
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import logging
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, Request, Response, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
-from app.schemas import (
-    ChatSessionCreate, 
-    ChatSessionResponse, 
-    ChatMessageCreate, 
-    ChatMessageResponse
-)
+from app.services.llm_service import LLMService, AnalysisConfig, llm_service
 from app.db.database import get_db
 from app.db.service import DatabaseService
-from app.core.logging_config import get_logger
 from app.services.cache import cache_service
 from app.core.rate_limiter import limiter
 
-# Import existing services
-try:
-    from app.services.llm import llm_service
-    from app.services.retreival import vector_store
-    from app.services.search import search_service
-    LLM_AVAILABLE = True
-    LLM_INIT_ERROR = None
-except Exception as e:
-    logger = get_logger(__name__)
-    logger.warning("llm_services_unavailable", error=str(e))
-    llm_service = None
-    vector_store = None
-    LLM_AVAILABLE = False
-    LLM_INIT_ERROR = str(e)
-
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
-logger = get_logger(__name__)
 
-# Retry decorator for HF model cold starts
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(Exception)
-)
-def generate_with_retry(context: str, question: str):
-    """Generate answer with retry logic for model cold starts"""
-    if not LLM_AVAILABLE or llm_service is None:
-        raise Exception("LLM service not available")
-    return llm_service.generate_answer(context, question)
+
+# ==================== SCHEMAS ====================
+
+class ChatSessionCreate(BaseModel):
+    title: str = Field(default="New Analysis Session")
+    document_ids: List[str] = Field(default_factory=list)
+
+
+class ChatSessionResponse(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    document_ids: List[str]
+    messages: List[Dict]
+
+
+class ChatMessageCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=10000)
+
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    role: str
+    content: str
+    timestamp: str
+    document_context: Optional[Dict] = None
+    metadata: Optional[Dict] = None
+
+
+# ==================== DEPENDENCIES ====================
+
+def get_llm_service() -> LLMService:
+    """Dependency injection for LLM service"""
+    return llm_service
+
+
+# ==================== SESSION MANAGEMENT ====================
 
 @router.get("/sessions", response_model=List[ChatSessionResponse])
 async def get_sessions(db: Session = Depends(get_db)):
-    """Get all chat sessions"""
+    """Retrieve all chat sessions (lightweight list view)"""
     sessions = DatabaseService.get_all_sessions(db)
     
-    # Convert ORM to response format
-    return [{
-        "id": session.id,
-        "title": session.title,
-        "created_at": session.created_at.isoformat(),
-        "updated_at": session.updated_at.isoformat(),
-        "document_ids": session.document_ids or [],
-        "messages": []  # Don't load all messages in list view
-    } for session in sessions]
+    return [
+        {
+            "id": s.id,
+            "title": s.title,
+            "created_at": s.created_at.isoformat(),
+            "updated_at": s.updated_at.isoformat(),
+            "document_ids": s.document_ids or [],
+            "messages": []  # Don't load messages in list view
+        }
+        for s in sessions
+    ]
+
 
 @router.post("/sessions", response_model=ChatSessionResponse)
 @limiter.limit("20/minute")
-async def create_session(request: Request, response: Response, session_data: ChatSessionCreate, db: Session = Depends(get_db)):
-    """Create a new chat session"""
+async def create_session(
+    request: Request,
+    response: Response,
+    session_data: ChatSessionCreate,
+    db: Session = Depends(get_db)
+):
+    """Create new analysis session"""
     session = DatabaseService.create_chat_session(
         db=db,
         title=session_data.title,
         document_ids=session_data.document_ids
     )
+    
     return {
         "id": session.id,
         "title": session.title,
@@ -79,489 +97,404 @@ async def create_session(request: Request, response: Response, session_data: Cha
         "messages": []
     }
 
+
 @router.get("/sessions/{session_id}", response_model=ChatSessionResponse)
-async def get_session(session_id: str, db: Session = Depends(get_db)):
-    """Get a specific chat session with all messages (with caching)"""
+async def get_session(
+    session_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get specific session with messages (cached)"""
     
-    # Try to get from cache first
-    cached_session = cache_service.get_cached_session(session_id)
-    if cached_session:
+    # Cache check
+    cached = cache_service.get_cached_session(session_id)
+    if cached:
         logger.info("session_cache_hit", session_id=session_id)
-        return cached_session
+        return cached
     
-    # Get from database
+    # DB fetch
     session = DatabaseService.get_chat_session(db, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Get messages for this session
     messages = DatabaseService.get_session_messages(db, session_id)
     
-    session_data = {
+    response_data = {
         "id": session.id,
         "title": session.title,
         "created_at": session.created_at.isoformat(),
         "updated_at": session.updated_at.isoformat(),
         "document_ids": session.document_ids or [],
-        "messages": [{
-            "id": msg.id,
-            "role": msg.role,
-            "content": msg.content,
-            "timestamp": msg.timestamp.isoformat()
-        } for msg in messages]
+        "messages": [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "timestamp": m.timestamp.isoformat()
+            }
+            for m in messages
+        ]
     }
     
-    # Cache for 30 minutes
-    cache_service.cache_session(session_id, session_data, ttl=1800)
-    logger.info("session_cache_miss_stored", session_id=session_id)
-    
-    return session_data
+    # Cache for 30 min
+    cache_service.cache_session(session_id, response_data, ttl=1800)
+    return response_data
+
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, db: Session = Depends(get_db)):
-    """Delete a chat session"""
+    """Delete session and invalidate cache"""
     success = DatabaseService.delete_chat_session(db, session_id)
     if not success:
-        raise HTTPException(status_code=404, detail="Chat session not found")
+        raise HTTPException(status_code=404, detail="Session not found")
     
-    # Invalidate cache
     cache_service.invalidate_session(session_id)
-    logger.info("session_deleted_cache_invalidated", session_id=session_id)
+    logger.info("session_deleted", session_id=session_id)
     
-    return {"success": True, "message": "Session deleted successfully"}
+    return {"success": True, "message": "Session deleted"}
+
+
+# ==================== CORE CHAT ENDPOINTS ====================
 
 @router.post("/sessions/{session_id}/messages", response_model=ChatMessageResponse)
-@limiter.limit("50/minute")
-async def send_message(request: Request, response: Response, session_id: str, message_data: ChatMessageCreate, db: Session = Depends(get_db)):
-    """Send a message in a chat session with RAG"""
+@limiter.limit("30/minute")
+async def send_message(
+    request: Request,
+    response: Response,
+    session_id: str,
+    message_data: ChatMessageCreate,
+    db: Session = Depends(get_db),
+    llm: LLMService = Depends(get_llm_service)
+):
+    """
+    Main chat endpoint - document analysis with RAG.
+    Non-streaming for simple queries, handles complex analysis.
+    """
     
-    # Check if session exists
+    # 1. Validate session
     session = DatabaseService.get_chat_session(db, session_id)
     if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
+        raise HTTPException(status_code=404, detail="Session not found")
     
-    # Create user message
-    user_message = DatabaseService.create_message(
+    # 2. Save user message
+    user_msg = DatabaseService.create_message(
         db=db,
         session_id=session_id,
         role="user",
         content=message_data.content
     )
     
-    # Generate AI response with RAG
+    # 3. Retrieve document context (RAG)
+    # TODO: Replace with actual vector store retrieval
+    document_text = _get_session_documents(session)
+    
+    # 4. SAFETY GATE: No document = No generation
+    if not document_text or len(document_text.strip()) < 100:
+        return _create_error_response(
+            session_id=session_id,
+            content="⚠️ No document uploaded or document too short. Please upload a document to analyze.",
+            db=db
+        )
+    
+    # 5. Classify and configure analysis
+    intent = llm.classify_intent(message_data.content)
+    depth = llm.classify_depth(message_data.content)
+    scope = llm.detect_scope(message_data.content)
+    
+    config = AnalysisConfig(
+        intent=intent,
+        depth=depth,
+        scope=scope,
+        allow_external_search=False,  # Default safe mode
+        require_citations=True
+    )
+    
+    # 6. Extract scoped context (Anti-hallucination filter)
+    scoped_context = llm.extract_scope_context(document_text, scope)
+    
+    # 7. Build system prompt (Single Source of Truth)
+    system_prompt = llm.build_system_prompt(config)
+    
+    # 8. Route by intent
     try:
-        # Create cache key for this RAG query (based on question + session docs)
-        doc_ids_key = sorted(session.document_ids) if session.document_ids else []
-        cache_key = cache_service._generate_key(
-            "rag_query",
-            query=message_data.content,
-            doc_ids=doc_ids_key
+        if intent == LLMService.INTENT_SCORING:
+            # Deterministic scoring - no streaming
+            answer = _handle_scoring_intent(llm, system_prompt, scoped_context, message_data.content)
+        elif intent == LLMService.INTENT_GAP_ANALYSIS:
+            # Structured gap analysis
+            answer = _handle_gap_analysis(llm, system_prompt, scoped_context, message_data.content)
+        else:
+            # Standard generation
+            answer = llm.generate(
+                system_prompt=system_prompt,
+                document_context=scoped_context,
+                question=message_data.content,
+                temperature=0.2
+            )
+            
+        # 9. Save and return
+        ai_msg = DatabaseService.create_message(
+            db=db,
+            session_id=session_id,
+            role="assistant",
+            content=answer,
+            document_context={"scope": scope, "intent": intent}
         )
         
-        # Try to get cached response
-        cached_response = cache_service.get(cache_key)
-        if cached_response:
-            logger.info("rag_cache_hit", session_id=session_id, query=message_data.content[:50])
-            ai_response_content = cached_response.get("content")
-            document_context = cached_response.get("document_context")
-        else:
-            # Cache miss - execute RAG pipeline
-            logger.info("rag_cache_miss", session_id=session_id, query=message_data.content[:50])
-            
-            if LLM_AVAILABLE and len(vector_store.chunks) > 0:
-                logger.info("rag_pipeline_started", session_id=session_id, question=message_data.content)
-            
-                # Skip rewriting to preserve exact user intent
-                rewritten_query = message_data.content
-                
-                # Step 2: Hybrid retrieval with reranking
-                retrieved_chunks = vector_store.retrieve_with_citations(
-                    rewritten_query, 
-                    k=10, # Increased for Qwen 32k context window 
-                    use_hybrid=True,
-                    use_reranking=True
-                )
-            
-            if retrieved_chunks:
-                # Trust the vector store's top results (already hybrid graded)
-                # LLM grading is too unstable for small models
-                relevant_chunks = retrieved_chunks
-
-                
-                # Step 4: Generate answer from context
-                if relevant_chunks:
-                    context = "\n\n".join([
-                        f"[{c['doc_name']}] {c['text']}" 
-                        for c in relevant_chunks
-                    ])
-                    
-                    # Use retry logic for generation
-                    try:
-                        generated_answer = generate_with_retry(context, message_data.content)
-                    except Exception as e:
-                        logger.error("generation_failed_after_retries", session_id=session_id, error=str(e))
-                        generated_answer = "⚠️ Model is warming up (cold start). Please try again in 10-15 seconds."
-                    
-                    # Step 5: Grade hallucination (Self-RAG critique)
-                    is_grounded = llm_service.grade_hallucination(context, generated_answer)
-                    
-                    if not is_grounded:
-                        generated_answer = f"⚠️ Low confidence: {generated_answer}\n\n(This answer may not be fully supported by the documents)"
-                    
-                    # Build response with citations
-                    citations = "\n\n📚 **Sources:**\n" + "\n".join([
-                        f"- {c['doc_name']} (similarity: {c.get('similarity_score', 0):.2f})"
-                        for c in relevant_chunks
-                    ])
-                    
-                    ai_response_content = f"{generated_answer}\n\n{citations}"
-                    
-                    # Store document context
-                    document_context = {
-                        "document_id": relevant_chunks[0]["doc_id"],
-                        "document_name": relevant_chunks[0]["doc_name"],
-                        "relevant_chunks": [c["text"][:200] + "..." for c in relevant_chunks]
-                    }
-                else:
-                    ai_response_content = "I found some documents, but none were relevant to your question. Could you rephrase?"
-                    document_context = None
-
-            else:
-                # Fallback when no documents or model not available
-                if not LLM_AVAILABLE:
-                    ai_response_content = "⚠️ AI model is initializing. Please wait 10-20 seconds and try again."
-                else:
-                    ai_response_content = "📄 No documents uploaded yet. Please upload documents to enable Q&A."
-                document_context = None
-    
-    except Exception as e:
-        logger.error("rag_pipeline_error", session_id=session_id, error=str(e), exc_info=True)
-        ai_response_content = f"⚠️ Error processing your question. This might be a model cold start - please try again in 15 seconds.\n\nTechnical details: {str(e)}"
-        document_context = None
-
-    # Cache successful RAG responses
-    if document_context and "⚠️" not in ai_response_content:
-        cache_data = {
-            "content": ai_response_content,
-            "document_context": document_context
+        return {
+            "id": ai_msg.id,
+            "role": "assistant",
+            "content": answer,
+            "timestamp": ai_msg.timestamp.isoformat(),
+            "document_context": {"retrieved_scope": scope, "intent": intent, "depth": depth},
+            "metadata": {"tokens_used": len(answer.split())}  # Approximate
         }
-        cache_service.set(cache_key, cache_data, ttl=3600)  # 1 hour TTL
-        logger.info("rag_response_cached", session_id=session_id)
-    
-    
-    ai_message = DatabaseService.create_message(
-        db=db,
-        session_id=session_id,
-        role="assistant",
-        content=ai_response_content,
-        document_context=document_context
-    )
-    
-    # Return the AI message (frontend will optimistically add user message)
-    return {
-        "id": ai_message.id,
-        "role": ai_message.role,
-        "content": ai_message.content,
-        "timestamp": ai_message.timestamp.isoformat(),
-        "document_context": ai_message.extra_data
-    }
+        
+    except Exception as e:
+        logger.error("generation_error", session_id=session_id, error=str(e))
+        return _create_error_response(
+            session_id=session_id,
+            content=f"⚠️ Analysis failed: {str(e)}. Please try again.",
+            db=db
+        )
+
 
 @router.post("/sessions/{session_id}/stream")
-async def stream_message(request: Request, session_id: str, message_data: ChatMessageCreate, db: Session = Depends(get_db)):
-    """Stream a message response using SSE-like format"""
-    from fastapi.responses import StreamingResponse
-    import json
+async def stream_message(
+    request: Request,
+    session_id: str,
+    message_data: ChatMessageCreate,
+    db: Session = Depends(get_db),
+    llm: LLMService = Depends(get_llm_service)
+):
+    """
+    Streaming endpoint for real-time analysis feedback.
+    Used for: Long-form improvements, detailed evaluations.
+    """
     
-    # Check if session exists
+    # Validate session
     session = DatabaseService.get_chat_session(db, session_id)
     if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
+        raise HTTPException(status_code=404, detail="Session not found")
     
-    # Create user message
-    # Fetch recent history for context
-    recent_messages = []
-    try:
-        # We need to use a new session or ensure the existing one is thread-safe if used in generator,
-        # but here we are in main thread before generator starts.
-        msgs = DatabaseService.get_session_messages(db, session_id)
-        # Convert to dict to avoid detached instance issues in generator
-        recent_messages = [{"role": m.role, "content": m.content} for m in msgs[-5:]]
-    except Exception as e:
-        logger.warning(f"Failed to fetch history: {e}")
-
-    user_message = DatabaseService.create_message(
-        db=db,
-        session_id=session_id,
-        role="user",
-        content=message_data.content
+    # Get document
+    document_text = _get_session_documents(session)
+    
+    if not document_text:
+        async def error_stream():
+            yield f"data: {json.dumps({'type': 'error', 'content': 'No document uploaded'})}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+    
+    # Save user message (non-blocking)
+    asyncio.create_task(
+        asyncio.to_thread(
+            DatabaseService.create_message,
+            db, session_id, "user", message_data.content
+        )
     )
     
+    # Configure analysis
+    intent = llm.classify_intent(message_data.content)
+    depth = llm.classify_depth(message_data.content)
+    scope = llm.detect_scope(message_data.content)
+    
+    config = AnalysisConfig(
+        intent=intent,
+        depth=depth,
+        scope=scope,
+        require_citations=True
+    )
+    
+    scoped_context = llm.extract_scope_context(document_text, scope)
+    system_prompt = llm.build_system_prompt(config)
+    
     async def event_generator():
-        context = ""
         full_response = ""
-        document_context = None
-        intent = "GENERAL_CHAT"  # Default intent if no documents to analyze
+        document_context = {"scope": scope, "intent": intent}
         
-        # RAG Logic (Simplified for streaming)
         try:
-            if not LLM_AVAILABLE:
-                logger.error(f"LLM not available during stream. Init error: {LLM_INIT_ERROR}")
-                yield f"data: {json.dumps({'type': 'error', 'content': f'AI Service Unavailable: {LLM_INIT_ERROR}. Please check backend logs.'})}\n\n"
-                return
-
-            if len(vector_store.chunks) > 0:
-                # 1. ORCHESTRATION: Parallel Control Stack (Intent, Depth, Scope, Rewrite)
-                yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: analyzing intent, depth, & scope...'})}\n\n"
-                await asyncio.sleep(0.01)
-
-                loop = asyncio.get_running_loop()
-                
-                # Execute blocking LLM calls in parallel threads
-                # Task A: Classify Intent
-                task_intent = loop.run_in_executor(None, llm_service.classify_intent, message_data.content)
-                # Task B: Rewrite Query (Optimistically)
-                task_rewrite = loop.run_in_executor(None, lambda: llm_service.rewrite_query(message_data.content, chat_history=recent_messages))
-                # Task C: Classify Reasoning Depth (Phase 12)
-                task_depth = loop.run_in_executor(None, llm_service.classify_depth, message_data.content)
-                # Task D: Detect Analysis Scope (Phase 12)
-                task_scope = loop.run_in_executor(None, llm_service.detect_scope, message_data.content)
-                
-                # Wait for all (Parallel Execution)
-                intent, rewritten_query, depth, scope = await asyncio.gather(task_intent, task_rewrite, task_depth, task_scope)
-                
-                yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: {intent} | {depth} | Scope: {scope}'})}\n\n"
-                await asyncio.sleep(0.01)
-
-                # 2. ORCHESTRATION: Fast-Path Routing
-                final_query = rewritten_query
-                
-                if intent == "GENERAL_CHAT":
-                    # Fast Path: Verify if we even need retrieval. 
-                    # For now, we still retrieve but maybe with original query if rewrite failed or was weird.
-                    pass
-                else:
-                    yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: searching local knowledge base...'})}\n\n"
-                
-                # Retrieve using the result from parallel execution
-                # Parallelize Vector Search and Graph Search
-                task_vector = loop.run_in_executor(None, lambda: vector_store.retrieve_with_citations(final_query, k=5 if depth == "IMPROVEMENT" else 3))
-                
-                # Knowledge Graph Search (Reasoning Layer)
-                from app.services.knowledge_graph import kg_service
-                task_graph = kg_service.search_graph(final_query)
-                
-                retrieved_chunks, graph_results = await asyncio.gather(task_vector, task_graph)
-                
-                if retrieved_chunks or graph_results:
-                    context = "\n\n".join([f"[{c['doc_name']}] {c['text']}" for c in retrieved_chunks])
+            # Status update
+            yield _sse_event("status", f"Analyzing: {intent} | Scope: {', '.join(scope)}")
+            
+            # Stream generation
+            async for token in _async_stream_wrapper(
+                llm.generate_stream(system_prompt, scoped_context, message_data.content)
+            ):
+                if "[STREAM_START]" in token:
+                    continue
+                if "[STREAM_END]" in token:
+                    break
                     
-                    if graph_results:
-                         yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: traversing graph ({len(graph_results)} nodes found)...'})}\n\n"
-                         graph_context = "\n".join([f"- {g['content']}" for g in graph_results])
-                         # CRITICAL: Label graph data as BACKGROUND to prevent hallucination
-                         context += f"\n\nBACKGROUND KNOWLEDGE (ENTITIES & STANDARDS):\n{graph_context}\n(NOTE: This is general knowledge, NOT from the user's document.)"
-
-                    # yield f"data: {json.dumps({'type': 'status', 'content': 'Reading context...'})}\n\n"
-                    
-                    document_context = {
-                        "document_name": retrieved_chunks[0]["doc_name"] if retrieved_chunks else "Knowledge Graph",
-                        "relevant_chunks": [c["text"][:200] + "..." for c in retrieved_chunks] if retrieved_chunks else [g['content'][:200] for g in graph_results]
-                    }
+                full_response += token
+                yield _sse_event("token", token)
             
-            # --- PHASE 13: LATENCY OPTIMIZATION ---
-            # 1. Check Cycle Cache (Semantic Caching)
-            # If we have the exact same query + intent + relevant chunks, return cached answer.
-            cache_key = ""
-            if intent in ["IMPROVEMENT", "EVALUATIVE"] and retrieved_chunks:
-                # Create a stable key based on query intent and the specific document chunks content
-                doc_hash = str(sum(hash(c['text']) for c in retrieved_chunks))
-                cache_key = f"analysis:{intent}:{depth}:{scope}:{doc_hash}"
-                
-                cached_analysis = cache_service.get(cache_key)
-                if cached_analysis:
-                     yield f"data: {json.dumps({'type': 'status', 'content': '⚡ Instant Analysis (Cached Response)'})}\n\n"
-                     await asyncio.sleep(0.5) # UX pause
-                     # Stream the cached content as if it were generating
-                     yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
-                     
-                     # Chunk it to simulate streaming (better UX than a massive text dump)
-                     chunk_size = 50
-                     content = cached_analysis.get("content", "")
-                     for i in range(0, len(content), chunk_size):
-                         yield f"data: {json.dumps({'type': 'token', 'content': content[i:i+chunk_size]})}\n\n"
-                         await asyncio.sleep(0.01)
-                         
-                     yield f"data: {json.dumps({'type': 'done', 'content': content, 'document_context': document_context})}\n\n"
-                     return # Exit early!
-
-            # --- AGENTIC REASONING LAYER ---
-            yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: verifying context sufficiency...'})}\n\n"
-            await asyncio.sleep(0.01)
+            # Completion
+            yield _sse_event("done", full_response, document_context)
             
-            # 4. ORCHESTRATION: Search Permission Control
-            should_search = False
-            search_reason = ""
-            
-            # Strict Rules
-            if intent == "ATS_ESTIMATION":
-                should_search = False
-                search_reason = "ATS Estimation requires strictly internal heuristics."
-            elif intent == "GAP_ANALYSIS":
-                should_search = False 
-                search_reason = "Gap Analysis relies strictly on document dates."
-            elif intent == "SEARCH_QUERY":
-                should_search = True
-                search_reason = "User explicitly requested external market/tech data."
-            else:
-                # Fallback to confidence check for GENERAL_CHAT or RESUME_ANALYSIS
-                top_score = retrieved_chunks[0].get("similarity_score", 0.0) if retrieved_chunks else 0.0
-                if top_score < 0.65:
-                    should_search = True
-                    search_reason = f"Low confidence match ({top_score:.2f}) - Context might be missing."
-                
-                external_keywords = ["market", "salary", "news", "trend"]
-                if any(k in message_data.content.lower() for k in external_keywords):
-                    should_search = True
-                    search_reason = "Detected external data request keywords."
-
-            # 2. Execute Search if Needed
-            search_context = ""
-            if should_search:
-                 yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: {search_reason} Optimizing search query...'})}\n\n"
-                 await asyncio.sleep(0.01) # Yield
-                 
-                 # Generate Smart Query
-                 smart_query = llm_service.generate_search_query(message_data.content, context)
-                 msg = f"Thinking: Searching web for '{smart_query}'..."
-                 yield f"data: {json.dumps({'type': 'status', 'content': msg})}\n\n"
-                 
-                 try:
-                     # NON-BLOCKING SEARCH: Run in thread pool with STRICT timeout
-                     # Tavily sometimes hangs for 60s. We cap it at 5s to keep the app snappy.
-                     search_task = asyncio.to_thread(search_service.search, smart_query, num_results=5)
-                     search_results = await asyncio.wait_for(search_task, timeout=5.0)
-                     
-                     if search_results:
-                         yield f"data: {json.dumps({'type': 'status', 'content': f'Found {len(search_results)} credible results. Verifying...'})}\n\n"
-                         
-                         # Format search results
-                         search_context = "\n\n".join([
-                             f"[External Source: {r.title} ({r.source_type})] {r.snippet} (Link: {r.link})"
-                             for r in search_results
-                         ])
-                         
-                         # Append to context
-                         context = f"{context}\n\nEXTERNAL BENCHMARK INFORMATION (FOR REFERENCE ONLY):\n---------------------------------------------------\n{search_context}\n---------------------------------------------------"
-                     else:
-                         yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: Web search yielded no results. Falling back to general knowledge.'})}\n\n"
-                 except Exception as exc:
-                     logger.error(f"Search failed: {exc}")
-                     yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: Search API unavailable. Proceeding with best effort.'})}\n\n"
-            else:
-                 yield f"data: {json.dumps({'type': 'status', 'content': 'Thinking: Local documents provided sufficient context.'})}\n\n"
-
-            # 5. ORCHESTRATION: Mode-Locked Generation
-            yield f"data: {json.dumps({'type': 'status', 'content': 'Generating response...'})}\n\n"
-            yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
-            
-            # Fetch specialized prompt and inject into context
-            system_prompt = llm_service.get_task_prompt(intent, depth=depth, scope=scope)
-            full_context = f"SYSTEM INSTRUCTION: {system_prompt}\n\nCONTEXT:\n{context}"
-            
-            # Dynamic Token Budget (Phase 12)
-            # INCREASED LIMITS (Feb 8 - User Request) for Deep Analysis
-            token_limit = 3072 if depth == "IMPROVEMENT" else (2048 if depth == "EVALUATIVE" else 512)
-            
-            # Hard Timeout (Phase 13)
-            # Factual = 30s, Evaluative = 90s, Improvement = 180s
-            timeout_limit = 180.0 if depth == "IMPROVEMENT" else (90.0 if depth == "EVALUATIVE" else 30.0)
-
-            # Helper for non-blocking iteration
-            async def async_wrap_iter(iterable):
-                """Wraps a sync iterator in an async generator using run_in_executor"""
-                loop = asyncio.get_event_loop()
-                iterator = iter(iterable)
-                done = False
-                while not done:
-                    try:
-                        # Offload the blocking next() call to a thread
-                        # This allows the event loop to stay responsive (and process timeouts)
-                        value = await loop.run_in_executor(None, next, iterator)
-                        yield value
-                    except StopIteration:
-                        done = True
-                    except Exception as e:
-                        logger.error(f"Async iterator error: {e}")
-                        done = True
-
-            try:
-                # Wrap generation in timeout block
-                async def generate_stream():
-                    # Turn sync generator into async one to prevent loop blocking
-                    async for token in async_wrap_iter(llm_service.stream_inference(message_data.content, full_context)):
-                        if "[STREAM_START]" in token: continue
-                        if "[STREAM_END]" in token: break
-                        yield token
-
-                # We can't strictly timeout the *generator* easily in async without buffering, 
-                # but we can enforce strict kwargs in llm_service.stream_inference (max_time).
-                # The LLMService already has `max_time=120.0`. We will trust that for safety, 
-                # but we can check checking time here if needed.
-                
-                # Streaming loop
-                start_time = asyncio.get_event_loop().time()
-                async for token in generate_stream():
-                    full_response += token
-                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
-                    
-                    # Manual Timeout Check
-                    if (asyncio.get_event_loop().time() - start_time) > timeout_limit:
-                        timeout_msg = json.dumps({'type': 'token', 'content': '\n\n[Timed out - Response Truncated for Speed]'})
-                        yield f"data: {timeout_msg}\n\n"
-                        break
-                        
-            except Exception as gen_err:
-                logger.error(f"Generation error: {gen_err}")
-                yield f"data: {json.dumps({'type': 'error', 'content': 'Error generating response.'})}\n\n"
-
-            # Finalize
-            yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'document_context': document_context})}\n\n"
-            
-            # Save assistant message to DB
-            try:
-                new_ai_msg = DatabaseService.create_message(
-                    db=db,
-                    session_id=session_id,
-                    role="assistant",
-                    content=full_response,
-                    document_context=document_context
+            # Background save
+            asyncio.create_task(
+                asyncio.to_thread(
+                    DatabaseService.create_message,
+                    db, session_id, "assistant", full_response, document_context
                 )
-                
-                # --- PHASE 13: CACHE WRITE ---
-                if cache_key and len(full_response) > 50:
-                    cache_data = {
-                        "content": full_response,
-                        "document_context": document_context
-                    }
-                    # Cache for 1 hour
-                    cache_service.set(cache_key, cache_data, ttl=3600)
-                    logger.info("analysis_cached", key=cache_key)
-                    
-            except Exception as e:
-                logger.error("failed_to_save_stream_message", error=str(e))
-                
+            )
+            
         except Exception as e:
             logger.error("stream_error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
-
+            yield _sse_event("error", str(e))
+    
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# ==================== UTILITY FUNCTIONS ====================
+
+def _get_session_documents(session) -> str:
+    """
+    Retrieve and concatenate all documents for a session.
+    TODO: Integrate with actual vector store / document service
+    """
+    # Placeholder: In production, fetch from vector store using session.document_ids
+    # For now, return empty to trigger safety gate if not implemented
+    return ""  # Implement actual document retrieval
+
+
+def _handle_scoring_intent(llm: LLMService, system_prompt: str, context: str, question: str) -> str:
+    """
+    Special handler for scoring intents - enforces deterministic calculation.
+    """
+    # First, check if document has measurable criteria
+    pre_check = llm.generate(
+        system_prompt="Does this document contain measurable/quantifiable criteria? Answer only YES or NO.",
+        document_context=context,
+        question="Can this be scored?",
+        max_new_tokens=10,
+        temperature=0.0
+    )
+    
+    if "no" in pre_check.lower():
+        return "❌ **Scoring Not Possible**\n\nThe document does not contain sufficient quantitative or measurable criteria to generate a meaningful score. Please upload a document with clear metrics, requirements, or evaluation criteria."
+    
+    # Proceed with structured scoring
+    return llm.generate(
+        system_prompt=system_prompt,
+        document_context=context,
+        question=question,
+        temperature=0.1  # Low creativity for scoring
+    )
+
+
+def _handle_gap_analysis(llm: LLMService, system_prompt: str, context: str, question: str) -> str:
+    """
+    Special handler for gap analysis - temporal verification.
+    """
+    # Extract dates first (could use NLP library in production)
+    date_extraction = llm.generate(
+        system_prompt="Extract all dates and date ranges from this document. List them in format: [Date/Range] - [Context]",
+        document_context=context,
+        question="List all temporal information",
+        max_new_tokens=512
+    )
+    
+    # Then analyze gaps
+    full_context = f"TEMPORAL DATA:\n{date_extraction}\n\nDOCUMENT:\n{context}"
+    
+    return llm.generate(
+        system_prompt=system_prompt,
+        document_context=full_context,
+        question=question
+    )
+
+
+def _create_error_response(session_id: str, content: str, db: Session) -> Dict:
+    """Helper for consistent error responses"""
+    # Save error as assistant message for continuity
+    try:
+        msg = DatabaseService.create_message(
+            db=db,
+            session_id=session_id,
+            role="assistant",
+            content=content
+        )
+        return {
+            "id": msg.id,
+            "role": "assistant",
+            "content": content,
+            "timestamp": msg.timestamp.isoformat(),
+            "document_context": None,
+            "metadata": {"error": True}
+        }
+    except Exception:
+        return {
+            "id": "error",
+            "role": "assistant",
+            "content": content,
+            "timestamp": "",
+            "document_context": None,
+            "metadata": {"error": True}
+        }
+
+
+def _sse_event(event_type: str, content: str, extra: Optional[Dict] = None) -> str:
+    """Format Server-Sent Event"""
+    import json
+    data = {"type": event_type, "content": content}
+    if extra:
+        data.update(extra)
+    return f"data: {json.dumps(data)}\n\n"
+
+
+async def _async_stream_wrapper(sync_generator):
+    """Convert sync generator to async for FastAPI streaming"""
+    loop = asyncio.get_event_loop()
+    iterator = iter(sync_generator)
+    
+    while True:
+        try:
+            token = await loop.run_in_executor(None, next, iterator)
+            yield token
+        except StopIteration:
+            break
+        except Exception as e:
+            logger.error("Stream wrapper error", error=str(e))
+            break
+
+
+# ==================== HEALTH & DEBUG ====================
 
 @router.get("/health")
 async def chat_health():
-    """Check chat service health"""
+    """Service health check"""
     return {
         "status": "online",
-        "llm_available": LLM_AVAILABLE,
-        "vector_store_chunks": len(vector_store.chunks) if vector_store else 0,
-        "documents_indexed": len(vector_store.documents) if vector_store else 0
+        "llm_status": llm_service.get_service_health(),
+        "version": "2.0.0-enterprise"
+    }
+
+
+@router.post("/debug/analyze")
+async def debug_analyze(
+    document: str,
+    question: str,
+    llm: LLMService = Depends(get_llm_service)
+):
+    """
+    Debug endpoint to see analysis configuration without saving.
+    Useful for testing prompt engineering.
+    """
+    intent = llm.classify_intent(question)
+    depth = llm.classify_depth(question)
+    scope = llm.detect_scope(question)
+    
+    config = AnalysisConfig(intent=intent, depth=depth, scope=scope)
+    system_prompt = llm.build_system_prompt(config)
+    scoped_context = llm.extract_scope_context(document, scope)
+    
+    return {
+        "config": {
+            "intent": intent,
+            "depth": depth,
+            "scope": scope
+        },
+        "system_prompt": system_prompt,
+        "context_length": len(scoped_context),
+        "context_preview": scoped_context[:500] + "..." if len(scoped_context) > 500 else scoped_context
     }
