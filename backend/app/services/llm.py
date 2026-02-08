@@ -317,11 +317,11 @@ class LLMService:
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
             streamer=streamer,
-            max_new_tokens=2048,      # Up from 1024 for detailed reports
+            max_new_tokens=4096,      # Up from 2048 to support deep analysis (e.g. detailed rewrites)
             do_sample=True,
             temperature=0.25,         # keep it low for factual streaming
             repetition_penalty=1.1,
-            max_time=120.0
+            max_time=180.0            # Increased timeout to match chat.py
         )
 
         def _generate():

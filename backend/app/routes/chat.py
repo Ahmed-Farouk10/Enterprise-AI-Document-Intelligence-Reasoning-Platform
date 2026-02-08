@@ -469,12 +469,12 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
             full_context = f"SYSTEM INSTRUCTION: {system_prompt}\n\nCONTEXT:\n{context}"
             
             # Dynamic Token Budget (Phase 12)
-            # INCREASED LIMITS (Feb 8) to prevent cutoff responses
-            token_limit = 2048 if depth == "IMPROVEMENT" else (1024 if depth == "EVALUATIVE" else 256)
+            # INCREASED LIMITS (Feb 8 - User Request) for Deep Analysis
+            token_limit = 3072 if depth == "IMPROVEMENT" else (2048 if depth == "EVALUATIVE" else 512)
             
             # Hard Timeout (Phase 13)
-            # Factual = 30s, Evaluative = 60s, Improvement = 120s
-            timeout_limit = 120.0 if depth == "IMPROVEMENT" else (60.0 if depth == "EVALUATIVE" else 30.0)
+            # Factual = 30s, Evaluative = 90s, Improvement = 180s
+            timeout_limit = 180.0 if depth == "IMPROVEMENT" else (90.0 if depth == "EVALUATIVE" else 30.0)
 
             # Helper for non-blocking iteration
             async def async_wrap_iter(iterable):
