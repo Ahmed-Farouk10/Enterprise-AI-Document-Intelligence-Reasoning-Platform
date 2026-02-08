@@ -37,7 +37,7 @@ async def startup_event():
     logger.info("application_startup", status="database_initialized")
 
     # Warmup LLM Service (Load Model into Memory)
-    from app.services.llm import llm_service
+    from app.services.llm_service import llm_service
     llm_service.warmup()
 
 # CORS Configuration

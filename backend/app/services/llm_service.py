@@ -604,4 +604,4 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
 
 
 # Singleton instance
-llm = LLMService()
+llm_service = LLMService()

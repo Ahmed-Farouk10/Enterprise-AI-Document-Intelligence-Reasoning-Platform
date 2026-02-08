@@ -107,11 +107,18 @@ def process_document_task(self, doc_id: str, file_path: str, mime_type: str, fil
             document.status = "failed"
             logger.warning("no_text_extracted", doc_id=doc_id)
         
-        # Add to Knowledge Graph (Cognee)
+        # Add to Knowledge Graph (Cognee Upgrade)
         if text and len(text.strip()) > 50:
             try:
                 import asyncio
                 from app.services.knowledge_graph import kg_service
+                
+                # Determine domain for Cognee configuration
+                doc_type = "auto_detect"
+                if "resume" in filename.lower() or "cv" in filename.lower():
+                    doc_type = "resume"
+                elif "contract" in filename.lower() or "agreement" in filename.lower():
+                    doc_type = "contract"
                 
                 # Run async graph processing in this sync worker safely
                 try:
@@ -121,16 +128,19 @@ def process_document_task(self, doc_id: str, file_path: str, mime_type: str, fil
                     asyncio.set_event_loop(loop)
                 
                 if loop.is_running():
-                    # If we are already in a running loop (unlikely for standard Celery but possible)
-                    # we should schedule it, but that's hard in a sync function.
-                    # Best effort for now: use run_until_complete if not running, or create new loop
-                    logger.warning("Event loop is already running in Celery task, skipping Cognee for safety.")
+                    # If we are already in a running loop, create a task and wait for it
+                    # (Used in testing or nested loops)
+                    future = asyncio.run_coroutine_threadsafe(
+                        kg_service.add_document(content=text, doc_id=doc_id, document_type=doc_type), 
+                        loop
+                    )
+                    future.result()
                 else:
-                    loop.run_until_complete(kg_service.add_document(content=text, doc_id=doc_id))
-                    logger.info("document_added_to_knowledge_graph", doc_id=doc_id)
+                    loop.run_until_complete(kg_service.add_document(content=text, doc_id=doc_id, document_type=doc_type))
+                
+                logger.info("document_added_to_knowledge_graph_upgraded", doc_id=doc_id, type=doc_type)
             except Exception as kg_error:
-                # Log but don't fail the task if graph fails, it's an enhancement
-                logger.error("knowledge_graph_processing_failed", doc_id=doc_id, error=str(kg_error))
+                logger.error("knowledge_graph_upgraded_processing_failed", doc_id=doc_id, error=str(kg_error))
         
         # Update document in database
         self.session.commit()

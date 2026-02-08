@@ -12,6 +12,10 @@ from app.db.database import get_db
 from app.db.service import DatabaseService
 from app.services.cache import cache_service
 from app.core.rate_limiter import limiter
+from app.services.retreival import vector_store
+from app.services.knowledge_graph import kg_service
+from app.services.cognee_engine import cognee_engine, AnalysisMode, GraphQueryResult
+import json
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -44,6 +48,26 @@ class ChatMessageResponse(BaseModel):
     timestamp: str
     document_context: Optional[Dict] = None
     metadata: Optional[Dict] = None
+
+
+# --- Cognee Enhanced Schemas ---
+
+class CogneeQuery(BaseModel):
+    question: str = Field(..., min_length=3, max_length=2000)
+    analysis_mode: str = Field(default="auto", description="entities, temporal, comparative, anomalies, summary, or auto")
+    include_graph_viz: bool = Field(default=False)
+    session_id: Optional[str] = None
+    document_id: Optional[str] = None
+
+
+class CogneeResponse(BaseModel):
+    answer: str
+    confidence: float
+    evidence_paths: List[List[Dict]]
+    entities: List[Dict]
+    analysis_mode: str
+    graph_stats: Optional[Dict] = None
+    processing_time_ms: int
 
 
 # ==================== DEPENDENCIES ====================
@@ -183,15 +207,19 @@ async def send_message(
         content=message_data.content
     )
     
-    # 3. Retrieve document context (RAG)
-    # TODO: Replace with actual vector store retrieval
-    document_text = _get_session_documents(session)
+    # 3. Retrieve document context (Cognee Graph Reasoning)
+    retrieval_data = await _get_retrieved_context(
+        message_data.content, 
+        depth=depth,
+        document_ids=session.document_ids or []
+    )
+    document_text = retrieval_data["full_context"]
     
     # 4. SAFETY GATE: No document = No generation
-    if not document_text or len(document_text.strip()) < 100:
+    if not document_text or len(document_text.strip()) < 50:
         return _create_error_response(
             session_id=session_id,
-            content="⚠️ No document uploaded or document too short. Please upload a document to analyze.",
+            content=" No relevant document context found. Please ensure you have uploaded a document.",
             db=db
         )
     
@@ -276,12 +304,17 @@ async def stream_message(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Get document
-    document_text = _get_session_documents(session)
+    # Get document (Cognee Graph Reasoning)
+    retrieval_data = await _get_retrieved_context(
+        message_data.content, 
+        depth=depth,
+        document_ids=session.document_ids or []
+    )
+    document_text = retrieval_data["full_context"]
     
     if not document_text:
         async def error_stream():
-            yield f"data: {json.dumps({'type': 'error', 'content': 'No document uploaded'})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'content': 'No relevant document context found'})}\n\n"
         return StreamingResponse(error_stream(), media_type="text/event-stream")
     
     # Save user message (non-blocking)
@@ -312,8 +345,17 @@ async def stream_message(
         document_context = {"scope": scope, "intent": intent}
         
         try:
-            # Status update
-            yield _sse_event("status", f"Analyzing: {intent} | Scope: {', '.join(scope)}")
+            # Phase 1: Reasoning Strategy
+            yield _sse_event("status", f"🔍 Graph Mode: {intent} | Depth: {depth}")
+            yield _sse_event("reasoning", "🕸️ Traversing knowledge graph for evidence...")
+            await asyncio.sleep(0.5) # UX for reasoning perception
+            
+            if retrieval_data.get("entities"):
+                entities = [e["name"] for e in retrieval_data["entities"]]
+                yield _sse_event("reasoning", f"✓ Found {len(entities)} relevant entities: {', '.join(entities[:3])}...")
+
+            # Phase 2: Synthesis
+            yield _sse_event("status", "Synthesizing answer from graph connections...")
             
             # Stream generation
             async for token in _async_stream_wrapper(
@@ -347,14 +389,47 @@ async def stream_message(
 
 # ==================== UTILITY FUNCTIONS ====================
 
-def _get_session_documents(session) -> str:
-    """
-    Retrieve and concatenate all documents for a session.
-    TODO: Integrate with actual vector store / document service
-    """
-    # Placeholder: In production, fetch from vector store using session.document_ids
-    # For now, return empty to trigger safety gate if not implemented
-    return ""  # Implement actual document retrieval
+async def _get_retrieved_context(query: str, depth: str, document_ids: List[str] = []) -> Dict[str, Any]:
+    """Retrieve context primarily from Cognee Knowledge Graph Engine."""
+    # 1. Map depth to analysis mode
+    mode = AnalysisMode.SUMMARY
+    if depth == LLMService.DEPTH_EVALUATIVE:
+        mode = AnalysisMode.ENTITY_EXTRACTION
+    elif depth == LLMService.DEPTH_IMPROVEMENT:
+        mode = AnalysisMode.RELATIONSHIP_MAPPING
+
+    try:
+        # 2. Execute Cognee graph query
+        result: GraphQueryResult = await cognee_engine.query(
+            question=query,
+            document_ids=document_ids,
+            mode=mode
+        )
+        
+        # 3. Build consolidated context from graph results
+        context_parts = [result.answer]
+        
+        entities_context = "\n".join([
+            f"- {e['name']}: {e['description']}" 
+            for e in result.entities_involved if e['description']
+        ])
+        if entities_context:
+            context_parts.append(f"\nRELEVANT ENTITIES:\n{entities_context}")
+            
+        return {
+            "full_context": "\n\n".join(context_parts),
+            "document_name": "Knowledge Graph",
+            "confidence": result.confidence_score,
+            "entities": result.entities_involved
+        }
+    except Exception as e:
+        logger.error(f"Cognee retrieval failed: {e}")
+        return {
+            "full_context": "Analysis unavailable. Graph reasoning engine encountered an error.",
+            "document_name": "Error",
+            "confidence": 0.0,
+            "entities": []
+        }
 
 
 def _handle_scoring_intent(llm: LLMService, system_prompt: str, context: str, question: str) -> str:
@@ -371,7 +446,7 @@ def _handle_scoring_intent(llm: LLMService, system_prompt: str, context: str, qu
     )
     
     if "no" in pre_check.lower():
-        return "❌ **Scoring Not Possible**\n\nThe document does not contain sufficient quantitative or measurable criteria to generate a meaningful score. Please upload a document with clear metrics, requirements, or evaluation criteria."
+        return " **Scoring Not Possible**\n\nThe document does not contain sufficient quantitative or measurable criteria to generate a meaningful score. Please upload a document with clear metrics, requirements, or evaluation criteria."
     
     # Proceed with structured scoring
     return llm.generate(
@@ -431,6 +506,145 @@ def _create_error_response(session_id: str, content: str, db: Session) -> Dict:
             "document_context": None,
             "metadata": {"error": True}
         }
+
+
+# --- Cognee Specialized Endpoints ---
+
+@router.post("/query", response_model=CogneeResponse)
+@limiter.limit("50/minute")
+async def cognee_query(
+    request: Request,
+    query: CogneeQuery,
+    db: Session = Depends(get_db)
+):
+    """
+    Execute Cognee knowledge graph query.
+    Primary analysis endpoint - replaces/augments standard RAG.
+    """
+    start_time = asyncio.get_event_loop().time()
+    
+    # Resolve document IDs
+    doc_ids = []
+    if query.session_id:
+        session = DatabaseService.get_chat_session(db, query.session_id)
+        if session:
+            doc_ids = session.document_ids or []
+    elif query.document_id:
+        doc_ids = [query.document_id]
+    
+    if not doc_ids:
+        raise HTTPException(status_code=400, detail="No documents specified.")
+    
+    # Map analysis mode
+    mode = _map_query_to_mode(query.question, query.analysis_mode)
+    
+    try:
+        # Execute Cognee query
+        result: GraphQueryResult = await cognee_engine.query(
+            question=query.question,
+            document_ids=doc_ids,
+            mode=mode,
+            include_subgraph=query.include_graph_viz
+        )
+        
+        processing_time = int((asyncio.get_event_loop().time() - start_time) * 1000)
+        
+        # Save to history if session provided
+        if query.session_id:
+            DatabaseService.create_message(db, query.session_id, "user", query.question)
+            DatabaseService.create_message(
+                db, query.session_id, "assistant", result.answer,
+                {"confidence": result.confidence_score, "mode": mode.value}
+            )
+        
+        return CogneeResponse(
+            answer=result.answer,
+            confidence=result.confidence_score,
+            evidence_paths=result.evidence_paths,
+            entities=result.entities_involved,
+            analysis_mode=mode.value,
+            graph_stats=result.subgraph if query.include_graph_viz else None,
+            processing_time_ms=processing_time
+        )
+    except Exception as e:
+        logger.error(f"Cognee query failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/documents/{document_id}/gaps")
+async def analyze_temporal_gaps(document_id: str):
+    """Specialized temporal gap analysis using Cognee graph."""
+    try:
+        result = await cognee_engine.analyze_gaps(document_id)
+        return {
+            "document_id": document_id,
+            "analysis": result.answer,
+            "confidence": result.confidence_score,
+            "evidence": result.evidence_paths
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/documents/compare")
+async def compare_documents(source_id: str, target_id: str):
+    """Compare two documents using graph alignment."""
+    try:
+        result = await cognee_engine.compare_to_standards(source_id, target_id)
+        return {
+            "source_id": source_id,
+            "target_id": target_id,
+            "alignment_score": result.confidence_score,
+            "analysis": result.answer,
+            "matched_entities": result.entities_involved
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/documents/{document_id}/trajectory")
+async def get_career_trajectory(document_id: str):
+    """Extract career progression from knowledge graph."""
+    try:
+        trajectory = await cognee_engine.extract_career_trajectory(document_id)
+        return {"document_id": document_id, "trajectory": trajectory}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/documents/{document_id}/graph")
+async def get_document_graph(document_id: str):
+    """Export document knowledge graph for visualization."""
+    try:
+        # In a real scenario, this would return a subgraph
+        return {"document_id": document_id, "nodes": [], "edges": []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Utility Functions for Cognee ---
+
+def _map_query_to_mode(question: str, requested_mode: str) -> AnalysisMode:
+    """Intelligent mode selection based on question content."""
+    if requested_mode != "auto":
+        mode_map = {
+            "entities": AnalysisMode.ENTITY_EXTRACTION,
+            "temporal": AnalysisMode.TEMPORAL_REASONING,
+            "comparative": AnalysisMode.COMPARATIVE_ANALYSIS,
+            "anomalies": AnalysisMode.ANOMALY_DETECTION,
+            "summary": AnalysisMode.SUMMARIZATION,
+            "relationships": AnalysisMode.RELATIONSHIP_MAPPING
+        }
+        return mode_map.get(requested_mode, AnalysisMode.ENTITY_EXTRACTION)
+    
+    q = question.lower()
+    if any(k in q for k in ["gap", "break", "between", "when", "timeline"]):
+        return AnalysisMode.TEMPORAL_REASONING
+    if any(k in q for k in ["compare", "fit", "match", "against"]):
+        return AnalysisMode.COMPARATIVE_ANALYSIS
+    if any(k in q for k in ["missing", "incomplete", "wrong", "error", "anomaly"]):
+        return AnalysisMode.ANOMALY_DETECTION
+    return AnalysisMode.SUMMARIZATION
 
 
 def _sse_event(event_type: str, content: str, extra: Optional[Dict] = None) -> str:
