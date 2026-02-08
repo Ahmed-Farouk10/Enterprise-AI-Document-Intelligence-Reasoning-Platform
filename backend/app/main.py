@@ -8,6 +8,7 @@ from app.core.rate_limiter import limiter, rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 import os
 import logging
+import asyncio
 
 # Initialize structured logging
 log_level = os.getenv("LOG_LEVEL", "INFO")
