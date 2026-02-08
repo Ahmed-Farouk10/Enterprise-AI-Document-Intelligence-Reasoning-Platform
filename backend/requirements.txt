@@ -50,7 +50,17 @@ tavily-python>=0.3.0
 ddgs>=0.1.0
 
 # Graph RAG & Knowledge Graph
-cognee>=0.1.0
+# Cognee & Graph RAG (Pinned to Avoid Backtracking)
+cognee==0.5.2
 networkx>=3.1.0
 huggingface-hub>=0.20.0
+fastapi-users>=14.0.1
+fastembed>=0.6.0
+pydantic>=2.7.0
+greenlet>=3.0.0
+gunicorn>=21.2.0
+
+# Optional Dependencies often dragged in
+litellm>=1.0.0
+instructor>=1.0.0
 # instructor>=0.5.2 # Cognee dependency often needed explicitly
