@@ -355,7 +355,7 @@ async def stream_message(request: Request, session_id: str, message_data: ChatMe
                 if retrieved_chunks or graph_results:
                     context = "\n\n".join([f"[{c['doc_name']}] {c['text']}" for c in retrieved_chunks])
                     
-                     if graph_results:
+                    if graph_results:
                          yield f"data: {json.dumps({'type': 'status', 'content': f'Thinking: traversing graph ({len(graph_results)} nodes found)...'})}\n\n"
                          graph_context = "\n".join([f"- {g['content']}" for g in graph_results])
                          # CRITICAL: Label graph data as BACKGROUND to prevent hallucination
