@@ -15,9 +15,10 @@ try:
     # SearchType and User models might vary by version, using current best practices
     # In cognee 0.5.2, search is accessible via cognee.search
     COGNEE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     COGNEE_AVAILABLE = False
-    logging.warning("Cognee not installed. Run: pip install cognee")
+    logging.error(f"Failed to import Cognee: {e}")
+    logging.warning("Cognee not installed or dependency missing. Run: pip install cognee[neo4j]")
 
 from app.core.cognee_config import settings
 

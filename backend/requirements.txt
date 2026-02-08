@@ -47,3 +47,4 @@ fastembed>=0.6.0
 greenlet>=3.0.0
 gunicorn>=21.2.0
 slowapi>=0.1.9
+playwright>=1.41.0

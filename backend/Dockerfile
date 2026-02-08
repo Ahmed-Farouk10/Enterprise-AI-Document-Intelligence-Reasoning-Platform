@@ -38,6 +38,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Verify Cognee installation (Will fail build if missing)
 RUN python -c "import cognee; print('Cognee installed:', cognee.__version__)"
 
+# Install Playwright dependencies (Required for Cognee's web browsing capabilities)
+RUN playwright install --with-deps chromium
+
 # Copy application code
 ENV DEPLOY_TIMESTAMP=20240208_1945
 COPY --chown=appuser:appuser . .
