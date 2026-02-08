@@ -11,7 +11,6 @@ import hashlib
 # Cognee imports
 try:
     import cognee
-    from cognee import DataPoint
     # SearchType and User models might vary by version, using current best practices
     # In cognee 0.5.2, search is accessible via cognee.search
     COGNEE_AVAILABLE = True
