@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from app.services.llm_service import LLMService, AnalysisConfig, llm_service
-from app.db.database import get_db
+from app.services.llm_service import LLMService, AnalysisConfig, llm_service
+from app.db.database import get_db, SessionLocal
 from app.db.service import DatabaseService
 from app.services.cache import cache_service
 from app.core.rate_limiter import limiter
@@ -372,12 +373,18 @@ async def stream_message(
             # Completion
             yield _sse_event("done", full_response, document_context)
             
-            # Background save
+            # Background save with NEW session (thread-safe)
+            def _save_background():
+                db_session = SessionLocal()
+                try:
+                    DatabaseService.create_message(
+                        db_session, session_id, "assistant", full_response, document_context
+                    )
+                finally:
+                    db_session.close()
+
             asyncio.create_task(
-                asyncio.to_thread(
-                    DatabaseService.create_message,
-                    db, session_id, "assistant", full_response, document_context
-                )
+                asyncio.to_thread(_save_background)
             )
             
         except Exception as e:

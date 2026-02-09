@@ -2,6 +2,20 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 import os
 
+# --- COGNEE PATH CONFIGURATION (MUST BE BEFORE IMPORT) ---
+# Detect writable directory for HuggingFace Spaces / Docker
+if os.getenv("HF_HOME"):
+    _cognee_root = os.path.join(os.getenv("HF_HOME"), "cognee_data")
+else:
+    _cognee_root = os.path.join(os.getcwd(), ".cognee_system")
+
+# Ensure directory exists
+os.makedirs(_cognee_root, exist_ok=True)
+
+# Set env vars for Cognee to pick up
+os.environ["COGNEE_ROOT_DIR"] = _cognee_root
+# ---------------------------------------------------------
+
 class CogneeSettings(BaseSettings):
     """Configuration for Cognee Knowledge Graph Engine"""
     
