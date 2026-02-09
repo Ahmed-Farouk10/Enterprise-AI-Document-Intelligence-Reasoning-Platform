@@ -396,22 +396,16 @@ async def stream_message(
 # ==================== UTILITY FUNCTIONS ====================
 
 async def _get_retrieved_context(query: str, depth: str, document_ids: List[str] = []) -> Dict[str, Any]:
-    """
-    Retrieve context using vector store (PRIMARY) with optional Cognee enhancement.
+    """Retrieve context using vector store (PRIMARY) with optional Cognee enhancement."""
     
-    Retrieval Strategy:
-    1. PRIMARY: Vector store hybrid search (always works)
-    2. BONUS: Cognee graph enhancement (may fail in restricted envs)
-    """
-    
-    # PRIMARY: Vector Store Retrieval
+    # ========== PRIMARY: VECTOR STORE ==========
     try:
         logger.info("🔍 Vector store retrieval (primary)")
         vector_results = vector_store.retrieve_with_citations(query, k=5, use_hybrid=True, use_reranking=True)
         
-        if not vector_results:
+        if not vector_results or len(vector_results) == 0:
             return {
-                "full_context": "No documents uploaded yet.",
+                "full_context": "No documents uploaded yet. Please upload a document first.",
                 "document_name": "None",
                 "confidence": 0.0,
                 "entities": [],
@@ -424,14 +418,9 @@ async def _get_retrieved_context(query: str, depth: str, document_ids: List[str]
             doc = r.get('doc_name', 'Unknown')
             content = r.get('content', '')
             score = r.get('score', 0.0)
-            context_parts.append(f"[{doc}] (Score: {score:.2f})
-{content}")
+            context_parts.append(f"[{doc}] (Score: {score:.2f})\n{content}")
         
-        vector_context = "
-
----
-
-".join(context_parts)
+        vector_context = "\n\n---\n\n".join(context_parts)
         logger.info(f"✅ Vector store: {len(vector_results)} chunks")
         
     except Exception as e:
@@ -444,7 +433,7 @@ async def _get_retrieved_context(query: str, depth: str, document_ids: List[str]
             "retrieval_method": "error"
         }
     
-    # BONUS: Try Cognee Enhancement
+    # ========== BONUS: COGNEE ENHANCEMENT ==========
     cognee_bonus = ""
     entities = []
     
@@ -460,18 +449,14 @@ async def _get_retrieved_context(query: str, depth: str, document_ids: List[str]
         
         if result.entities_involved:
             entities = result.entities_involved
-            entity_list = "
-".join([f"- {e['name']}: {e['description']}" for e in entities[:5] if e.get('description')])
+            entity_list = "\n".join([f"- {e['name']}: {e['description']}" for e in entities[:5] if e.get('description')])
             if entity_list:
-                cognee_bonus = f"
-
-**GRAPH INSIGHTS**:
-{entity_list}"
+                cognee_bonus = f"\n\n**GRAPH INSIGHTS**:\n{entity_list}"
                 logger.info(f"✅ Cognee: {len(entities)} entities")
     except Exception as e:
         logger.warning(f"⚠️ Cognee unavailable: {str(e)[:100]}")
     
-    # Combine
+    # ========== RETURN COMBINED ==========
     final_context = vector_context + cognee_bonus
     method = "vector_store" if not cognee_bonus else "hybrid"
     
