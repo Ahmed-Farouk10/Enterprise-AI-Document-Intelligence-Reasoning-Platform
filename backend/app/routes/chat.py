@@ -345,9 +345,19 @@ async def stream_message(
         document_context = {"scope": scope, "intent": intent}
         
         try:
-            # Phase 1: Reasoning Strategy
-            yield _sse_event("status", f"🔍 Graph Mode: {intent} | Depth: {depth}")
-            yield _sse_event("reasoning", "🕸️ Traversing knowledge graph for evidence...")
+            # Phase 1: Show ACTUAL retrieval method used
+            retrieval_method = retrieval_data.get("retrieval_method", "unknown")
+            
+            if retrieval_method == "hybrid":
+                yield _sse_event("status", f"🔍 Hybrid Mode: Vector Store + Graph | Depth: {depth}")
+                yield _sse_event("reasoning", "🕸️ Combining vector search with knowledge graph...")
+            elif retrieval_method == "cognee":
+                yield _sse_event("status", f"🔍 Graph Mode: {intent} | Depth: {depth}")
+                yield _sse_event("reasoning", "🕸️ Traversing knowledge graph for evidence...")
+            else:  # vector_store or none
+                yield _sse_event("status", f"🔍 Vector Search Mode: {intent} | Depth: {depth}")
+                yield _sse_event("reasoning", "📚 Searching document embeddings for relevant context...")
+            
             await asyncio.sleep(0.5) # UX for reasoning perception
             
             if retrieval_data.get("entities"):
@@ -355,7 +365,10 @@ async def stream_message(
                 yield _sse_event("reasoning", f"✓ Found {len(entities)} relevant entities: {', '.join(entities[:3])}...")
 
             # Phase 2: Synthesis
-            yield _sse_event("status", "Synthesizing answer from graph connections...")
+            if retrieval_method == "cognee" or retrieval_method == "hybrid":
+                yield _sse_event("status", "Synthesizing answer from graph connections...")
+            else:
+                yield _sse_event("status", "Synthesizing answer from retrieved documents...")
             
             # Stream generation
             async for token in _async_stream_wrapper(
