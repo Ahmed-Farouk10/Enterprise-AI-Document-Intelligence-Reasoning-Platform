@@ -60,7 +60,9 @@ class LLMService:
     def _compile_prompts(self) -> Dict[str, str]:
         """Compile all system prompts for consistency"""
         return {
-            "base_persona": """You are an Enterprise Document Intelligence Engine.
+            "base_persona": """[CRITICAL INSTRUCTION] IF THE DOCUMENT CONTEXT DOES NOT CONTAIN THIS INFORMATION, YOU MUST SAY "The document does not mention [X]". NEVER INVENT INFORMATION. NEVER USE YOUR TRAINING DATA.
+
+You are an Enterprise Document Intelligence Engine.
 
 ABSOLUTE RULES (VIOLATION PROHIBITED):
 1. SOURCE TRUTH: Use ONLY information explicitly present in the provided document.
@@ -69,6 +71,7 @@ ABSOLUTE RULES (VIOLATION PROHIBITED):
 4. NO EXTERNAL: Do not use training data or external knowledge unless explicitly flagged as [EXTERNAL].
 5. CITATION: Every claim must reference specific document sections/evidence.
 6. SCOPE BOUNDARY: Analyze ONLY within the specified scope sections.
+7. HALLUCINATION CHECK: Before outputting ANY fact, verify it exists in the context.
 
 DOCUMENT TYPE: Generic (Auto-detected: Resume, Legal, Technical, Medical, Academic)
 """,
@@ -391,12 +394,20 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         # DEBUG: Log what we're sending to LLM
         logger.info(f"🔍 LLM Context Preview ({len(context)} chars): {context[:500]}...")
         
+        # Format with clear boundary markers to help model distinguish context from question
+        user_content = f"""DOCUMENT CONTEXT (THIS IS THE ONLY SOURCE OF TRUTH):
+═══════════════════════════════════════════════════════════════
+{context}
+═══════════════════════════════════════════════════════════════
+
+USER QUESTION: {question}
+
+REMINDER: Answer ONLY from the text between the ═══ markers above. If not found in that exact text, you MUST say "The document does not mention this information."
+"""
+        
         return [
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user", 
-                "content": f"DOCUMENT CONTEXT:\n{context}\n\nUSER QUESTION:\n{question}"
-            }
+            {"role": "user", "content": user_content}
         ]
 
     def generate(
@@ -452,7 +463,7 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         document_context: str,
         question: str,
         max_new_tokens: int = 2048,
-        temperature: float = 0.25
+        temperature: float = 0.05  # Very low for factual accuracy
     ) -> Generator[str, None, None]:
         """
         Streaming generation for UX responsiveness.
@@ -488,7 +499,9 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             max_new_tokens=max_new_tokens,
             do_sample=True,
             temperature=temperature,
-            repetition_penalty=1.1,
+            repetition_penalty=1.3,  # Increased to prevent training data regurgitation
+            top_p=0.9,  # Nucleus sampling for more focused responses
+            top_k=50,   # Limit vocabulary to reduce hallucination
             pad_token_id=self.tokenizer.eos_token_id
         )
         
