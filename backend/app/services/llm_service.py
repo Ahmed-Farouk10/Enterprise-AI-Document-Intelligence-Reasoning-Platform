@@ -385,6 +385,12 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         question: str
     ) -> List[Dict[str, str]]:
         """Prepare message list for chat template"""
+        from app.core.logging_config import get_logger
+        logger = get_logger(__name__)
+        
+        # DEBUG: Log what we're sending to LLM
+        logger.info(f"🔍 LLM Context Preview ({len(context)} chars): {context[:500]}...")
+        
         return [
             {"role": "system", "content": system_prompt},
             {
