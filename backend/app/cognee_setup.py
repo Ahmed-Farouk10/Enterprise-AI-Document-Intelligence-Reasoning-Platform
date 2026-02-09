@@ -37,9 +37,11 @@ def configure_cognee_paths():
     os.makedirs(cognee_root, exist_ok=True)
     
     # Set environment variables for Cognee to pick up
-    os.environ["COGNEE_ROOT_DIR"] = cognee_root
+    # Cognee 0.5.2 uses SYSTEM_ROOT_DIRECTORY for its data directory
+    os.environ["SYSTEM_ROOT_DIRECTORY"] = cognee_root
     
-    # Also set specific database paths if Cognee uses them
+    # Also set legacy variables in case they're used
+    os.environ["COGNEE_ROOT_DIR"] = cognee_root
     os.environ["COGNEE_DB_PATH"] = os.path.join(cognee_root, "databases")
     os.environ["COGNEE_DATA_DIR"] = cognee_root
     
@@ -48,7 +50,7 @@ def configure_cognee_paths():
     print(f"=" * 80)
     print(f"Environment: {env_type}")
     print(f"Cognee Root: {cognee_root}")
-    print(f"DB Path: {os.environ.get('COGNEE_DB_PATH', 'Not Set')}")
+    print(f"SYSTEM_ROOT_DIRECTORY: {os.environ.get('SYSTEM_ROOT_DIRECTORY')}")
     print(f"Writable: {os.access(cognee_root, os.W_OK)}")
     print(f"=" * 80)
     
