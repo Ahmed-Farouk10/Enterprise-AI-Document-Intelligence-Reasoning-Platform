@@ -104,6 +104,7 @@ def process_document_task(self, doc_id: str, file_path: str, mime_type: str, fil
             
             document.status = "completed"
             logger.info("document_processed_successfully", doc_id=doc_id, text_length=len(text))
+        else:
             document.status = "failed"
             logger.warning("no_text_extracted", doc_id=doc_id)
         
