@@ -70,18 +70,54 @@ async def upload_document(request: Request, response: Response, file: UploadFile
         db.commit()
         db.refresh(document)
         
-        # Dispatch processing task (Async via Celery Worker)
-        # Using .delay() offloads to Redis queue for background worker
-        task = process_document_task.delay(
-            doc_id=document.id,
-            file_path=unique_filename,
-            mime_type=file.content_type,
-            filename=file.filename
-        )
+        # Try Celery first, fallback to inline processing
+        try:
+            task = process_document_task.delay(
+                doc_id=document.id,
+                file_path=unique_filename,
+                mime_type=file.content_type,
+                filename=file.filename
+            )
+            task_id = task.id
+            processing_mode = "background"
+            logger.info("document_queued", doc_id=document.id, task_id=task_id)
+        except Exception as celery_error:
+            # Celery/Redis not available - process inline
+            logger.warning(f"Celery unavailable ({celery_error}), processing inline")
+            
+            # Extract text based on file type
+            text = ""
+            if file.content_type == "text/plain":
+                with open(file_path, "r", encoding="utf-8") as f:
+                    text = f.read()
+            elif file.content_type == "application/pdf":
+                try:
+                    import pdfplumber
+                    with pdfplumber.open(file_path) as pdf:
+                        text = "\n\n".join([page.extract_text() or "" for page in pdf.pages])
+                except Exception as pdf_error:
+                    logger.error(f"PDF extraction failed: {pdf_error}")
+            
+            # Index in vector store
+            if text and len(text.strip()) > 10:
+                vector_store.add_document(
+                    text=text,
+                    doc_id=document.id,
+                    doc_name=file.filename
+                )
+                document.status = "completed"
+                logger.info(f"✅ Document indexed inline: {len(text)} chars, doc_id={document.id}")
+            else:
+                document.status = "failed"
+                logger.warning(f"No text extracted from document: {document.id}")
+            
+            db.commit()
+            task_id = "inline"
+            processing_mode = "inline"
         
-        logger.info("document_processed_inline", doc_id=document.id, filename=file.filename)
+        logger.info("document_processed_inline", doc_id=document.id, filename=file.filename, mode=processing_mode)
         
-        # Return immediately with pending status
+        # Return with appropriate status
         return {
             "id": document.id,
             "filename": document.filename,
@@ -89,12 +125,13 @@ async def upload_document(request: Request, response: Response, file: UploadFile
             "file_size": document.file_size,
             "mime_type": document.mime_type,
             "uploaded_at": document.created_at.isoformat(),
-            "processed_at": None,
-            "status": "pending",
+            "processed_at": document.updated_at.isoformat() if document.status == "completed" else None,
+            "status": document.status,
             "version": document.version,
             "metadata": {
-                "task_id": task.id,
-                "message": "Document uploaded successfully. Processing in background."
+                "task_id": task_id,
+                "processing_mode": processing_mode,
+                "message": "Document processed inline." if processing_mode == "inline" else "Processing in background."
             }
         }
     
