@@ -396,92 +396,79 @@ async def stream_message(
 # ==================== UTILITY FUNCTIONS ====================
 
 async def _get_retrieved_context(query: str, depth: str, document_ids: List[str] = []) -> Dict[str, Any]:
-    """
-    Retrieve context using vector store (PRIMARY) with optional Cognee enhancement.
-    
-    Retrieval Strategy:
-    1. PRIMARY: Vector store hybrid search (always works)
-    2. BONUS: Cognee graph enhancement (may fail in restricted envs)
-    """
-    
-    # PRIMARY: Vector Store Retrieval
+    """Retrieve context primarily from Cognee Knowledge Graph Engine."""
+    # 1. Map depth to analysis mode
+    mode = AnalysisMode.SUMMARIZATION
+    if depth == LLMService.DEPTH_EVALUATIVE:
+        mode = AnalysisMode.ENTITY_EXTRACTION
+    elif depth == LLMService.DEPTH_IMPROVEMENT:
+        mode = AnalysisMode.RELATIONSHIP_MAPPING
+
     try:
-        logger.info("🔍 Vector store retrieval (primary)")
-        vector_results = vector_store.retrieve_with_citations(query, k=5, use_hybrid=True, use_reranking=True)
+        # 2. Execute Cognee graph query
+        result: GraphQueryResult = await cognee_engine.query(
+            question=query,
+            document_ids=document_ids,
+            mode=mode
+        )
         
-        if not vector_results:
+        # 3. Build consolidated context from graph results
+        context_parts = [result.answer]
+        
+        entities_context = "\n".join([
+            f"- {e['name']}: {e['description']}" 
+            for e in result.entities_involved if e['description']
+        ])
+        if entities_context:
+            context_parts.append(f"\nRELEVANT ENTITIES:\n{entities_context}")
+            
+        logger.info(f"✅ Cognee retrieval successful (confidence: {result.confidence_score})")
+        return {
+            "full_context": "\n\n".join(context_parts),
+            "document_name": "Knowledge Graph",
+            "confidence": result.confidence_score,
+            "entities": result.entities_involved,
+            "retrieval_method": "cognee"
+        }
+    except Exception as e:
+        # FALLBACK: Use vector store if Cognee fails
+        logger.warning(f"⚠️ Cognee retrieval failed: {e}. Falling back to vector store.")
+        
+        try:
+            # Use traditional vector search as backup
+            vector_results = vector_store.retrieve_with_citations(query, k=5)
+            
+            if not vector_results or len(vector_results) == 0:
+                return {
+                    "full_context": "No relevant document context found. Please upload a document first.",
+                    "document_name": "Error",
+                    "confidence": 0.0,
+                    "entities": [],
+                    "retrieval_method": "none"
+                }
+            
+            # Format vector store results
+            context_parts = []
+            for result in vector_results:
+                context_parts.append(f"[Document: {result.get('doc_name', 'Unknown')}]\n{result.get('content', '')}")
+            
+            logger.info(f"✅ Vector store fallback successful ({len(vector_results)} chunks retrieved)")
             return {
-                "full_context": "No documents uploaded yet.",
-                "document_name": "None",
+                "full_context": "\n\n---\n\n".join(context_parts),
+                "document_name": vector_results[0].get('doc_name', 'Unknown'),
+                "confidence": 0.75,  # Lower confidence for vector-only results
+                "entities": [],
+                "retrieval_method": "vector_store"
+            }
+        except Exception as vector_error:
+            logger.error(f"❌ Both Cognee and vector store failed: {vector_error}")
+            return {
+                "full_context": "System error: Unable to retrieve document context. Please try again.",
+                "document_name": "Error",
                 "confidence": 0.0,
                 "entities": [],
-                "retrieval_method": "none"
+                "retrieval_method": "error"
             }
-        
-        # Format results
-        context_parts = []
-        for r in vector_results:
-            doc = r.get('doc_name', 'Unknown')
-            content = r.get('content', '')
-            score = r.get('score', 0.0)
-            context_parts.append(f"[{doc}] (Score: {score:.2f})
-{content}")
-        
-        vector_context = "
-
----
-
-".join(context_parts)
-        logger.info(f"✅ Vector store: {len(vector_results)} chunks")
-        
-    except Exception as e:
-        logger.error(f"❌ Vector store failed: {e}")
-        return {
-            "full_context": "System error retrieving documents.",
-            "document_name": "Error",
-            "confidence": 0.0,
-            "entities": [],
-            "retrieval_method": "error"
-        }
-    
-    # BONUS: Try Cognee Enhancement
-    cognee_bonus = ""
-    entities = []
-    
-    try:
-        logger.info("🧠 Trying Cognee enhancement")
-        mode = AnalysisMode.SUMMARIZATION
-        if depth == LLMService.DEPTH_EVALUATIVE:
-            mode = AnalysisMode.ENTITY_EXTRACTION
-        elif depth == LLMService.DEPTH_IMPROVEMENT:
-            mode = AnalysisMode.RELATIONSHIP_MAPPING
-        
-        result = await cognee_engine.query(question=query, document_ids=document_ids, mode=mode)
-        
-        if result.entities_involved:
-            entities = result.entities_involved
-            entity_list = "
-".join([f"- {e['name']}: {e['description']}" for e in entities[:5] if e.get('description')])
-            if entity_list:
-                cognee_bonus = f"
-
-**GRAPH INSIGHTS**:
-{entity_list}"
-                logger.info(f"✅ Cognee: {len(entities)} entities")
-    except Exception as e:
-        logger.warning(f"⚠️ Cognee unavailable: {str(e)[:100]}")
-    
-    # Combine
-    final_context = vector_context + cognee_bonus
-    method = "vector_store" if not cognee_bonus else "hybrid"
-    
-    return {
-        "full_context": final_context,
-        "document_name": vector_results[0].get('doc_name', 'Unknown'),
-        "confidence": 0.85,
-        "entities": entities,
-        "retrieval_method": method
-    }
 
 
 def _handle_scoring_intent(llm: LLMService, system_prompt: str, context: str, question: str) -> str:
