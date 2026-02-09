@@ -44,7 +44,7 @@ class KnowledgeGraphService:
             result = await self.engine.query(
                 question=query,
                 document_ids=[], # Searches across all if empty
-                mode=AnalysisMode.SUMMARY
+                mode=AnalysisMode.SUMMARIZATION
             )
             
             # Format results for legacy context usage

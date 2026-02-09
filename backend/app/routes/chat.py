@@ -392,7 +392,7 @@ async def stream_message(
 async def _get_retrieved_context(query: str, depth: str, document_ids: List[str] = []) -> Dict[str, Any]:
     """Retrieve context primarily from Cognee Knowledge Graph Engine."""
     # 1. Map depth to analysis mode
-    mode = AnalysisMode.SUMMARY
+    mode = AnalysisMode.SUMMARIZATION
     if depth == LLMService.DEPTH_EVALUATIVE:
         mode = AnalysisMode.ENTITY_EXTRACTION
     elif depth == LLMService.DEPTH_IMPROVEMENT:
