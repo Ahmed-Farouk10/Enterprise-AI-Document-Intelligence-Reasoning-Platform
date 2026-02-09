@@ -104,33 +104,44 @@ class CogneeEngine:
         metadata: Optional[Dict] = None
     ) -> DocumentGraph:
         """
-        Ingest document into Cognee knowledge graph.
+        Ingest document into Cognee knowledge graph with real Cognee processing.
         """
-        await self.initialize()
-        
-        # Auto-detect domain if not specified
-        if document_type == "auto_detect":
-            document_type = await self._detect_domain(document_text)
-        
-        # In Cognee 0.5.2, we add text directly
-        # metadata can be part of the dataset or custom properties
-        await cognee.add(document_text, dataset_name=document_id)
-        
-        # Extract knowledge graph (cognify)
-        logger.info(f"Cognifying document: {document_id}")
-        await cognee.cognify()
-        
-        # Get graph statistics
-        stats = await self._get_graph_stats(document_id)
-        
-        return DocumentGraph(
-            document_id=document_id,
-            entity_count=stats["entity_count"],
-            relationship_count=stats["relationship_count"],
-            temporal_facts=stats["temporal_facts"],
-            domain_type=document_type,
-            graph_stats=stats
-        )
+        try:
+            # Auto-detect domain if not specified
+            if document_type == "auto_detect":
+                document_type = await self._detect_domain(document_text)
+            
+            # Create dataset name for this document
+            dataset_name = f"doc_{document_id}"
+            
+            # Add document to Cognee with metadata
+            logger.info(f"Adding document {document_id} to Cognee dataset: {dataset_name}")
+            await cognee.add(
+                data=document_text,
+                dataset_name=dataset_name
+            )
+            
+            # Build knowledge graph using Cognee
+            logger.info(f"Building knowledge graph for document: {document_id}")
+            await cognee.cognify(datasets=[dataset_name])
+            
+            # Get graph statistics from Neo4j
+            stats = await self._get_graph_stats_from_neo4j(document_id)
+            
+            logger.info(f"Document {document_id} ingested successfully: {stats['entity_count']} entities, {stats['relationship_count']} relationships")
+            
+            return DocumentGraph(
+                document_id=document_id,
+                entity_count=stats["entity_count"],
+                relationship_count=stats["relationship_count"],
+                temporal_facts=stats.get("temporal_facts", []),
+                domain_type=document_type,
+                graph_stats=stats
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to ingest document {document_id}: {e}")
+            raise RuntimeError(f"Cognee ingestion failed: {str(e)}")
     
     async def _detect_domain(self, text: str) -> str:
         """Auto-detect document domain using Cognee classification"""
@@ -145,19 +156,34 @@ class CogneeEngine:
         
         return "generic"
     
-    async def _get_graph_stats(self, document_id: str) -> Dict:
-        """Extract statistics from constructed knowledge graph using search results as stats proxy if direct DB access is limited"""
-        # In a real Neo4j environment, we'd query the graph directly.
-        # Here we prioritize the Cognee interface.
-        
-        # Mocking statistics for now based on Cognee's search capabilities
-        # A more robust implementation would use a Neo4j driver if settings.GRAPH_DB_TYPE == "neo4j"
-        return {
-            "entity_count": 0, # Placeholder
-            "relationship_count": 0, # Placeholder
-            "entity_types": [],
-            "temporal_facts": []
-        }
+    async def _get_graph_stats_from_neo4j(self, document_id: str) -> Dict:
+        """Extract statistics from Neo4j knowledge graph for a specific document"""
+        try:
+            from app.services.neo4j_service import neo4j_service
+            
+            # Get overall graph statistics
+            overall_stats = await neo4j_service.get_graph_statistics()
+            
+            # TODO: Filter by document_id when we add document tracking to nodes
+            # For now, return overall stats
+            # In production, you'd query: MATCH (d:Document {id: $doc_id})-[*]-(n) RETURN count(n)
+            
+            return {
+                "entity_count": overall_stats.get("entity_count", 0),
+                "relationship_count": overall_stats.get("relationship_count", 0),
+                "temporal_facts": [],  # Extract from graph if temporal data exists
+                "document_id": document_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get graph stats from Neo4j: {e}")
+            # Return zeros on error
+            return {
+                "entity_count": 0,
+                "relationship_count": 0,
+                "temporal_facts": [],
+                "document_id": document_id
+            }
     
     # ==================== QUERY & REASONING ====================
     
@@ -169,45 +195,60 @@ class CogneeEngine:
         include_subgraph: bool = False
     ) -> GraphQueryResult:
         """
-        Execute Cognee graph query with reasoning.
+        Execute Cognee graph query with reasoning using real Cognee search.
         """
-        await self.initialize()
-        
-        # Execute graph search via Cognee
-        # We simulate the search type by enriching the question or using Cognee's search filters if available
-        search_results = await cognee.search(question)
-        
-        # Build evidence paths (graph traversals)
-        # Note: In 0.5.2, search results contain nodes and their metadata
-        evidence_paths = [] # Simplified for now
-        
-        # Calculate confidence based on search results
-        confidence = 0.85 if search_results else 0.0
-        
-        # Generate natural language answer from graph
-        answer = await self._synthesize_answer(
-            question=question,
-            search_results=search_results,
-            evidence_paths=evidence_paths,
-            mode=mode
-        )
-        
-        # Extract involved entities
-        entities = self._extract_entities_from_results(search_results)
-        
-        # Optional: Get subgraph for visualization
-        subgraph = None
-        if include_subgraph:
-            subgraph = {"nodes": [], "links": []} # Placeholder
-        
-        return GraphQueryResult(
-            answer=answer,
-            evidence_paths=evidence_paths,
-            entities_involved=entities,
-            confidence_score=confidence,
-            query_type=mode.value,
-            subgraph=subgraph
-        )
+        try:
+            # Execute graph search via Cognee
+            logger.info(f"Querying Cognee graph: {question}")
+            search_results = await cognee.search(
+                query_text=question,
+                search_type="INSIGHTS"  # Use INSIGHTS for graph-based answers
+            )
+            
+            # Extract entities from search results
+            entities = self._extract_entities_from_results(search_results)
+            
+            # Build evidence paths from graph traversals
+            evidence_paths = self._build_evidence_paths(search_results)
+            
+            # Calculate confidence based on graph evidence
+            confidence = self._calculate_confidence(search_results, evidence_paths)
+            
+            # Generate natural language answer from graph
+            answer = await self._synthesize_answer(
+                question=question,
+                search_results=search_results,
+                evidence_paths=evidence_paths,
+                mode=mode
+            )
+            
+            # Get subgraph for visualization if requested
+            subgraph = None
+            if include_subgraph:
+                subgraph = await self._extract_subgraph(entities)
+            
+            logger.info(f"Query completed: {len(entities)} entities, confidence={confidence:.2f}")
+            
+            return GraphQueryResult(
+                answer=answer,
+                evidence_paths=evidence_paths,
+                entities_involved=entities,
+                confidence_score=confidence,
+                query_type=mode.value,
+                subgraph=subgraph
+            )
+            
+        except Exception as e:
+            logger.error(f"Graph query failed: {e}")
+            # Return empty result on error
+            return GraphQueryResult(
+                answer="Unable to query knowledge graph.",
+                evidence_paths=[],
+                entities_involved=[],
+                confidence_score=0.0,
+                query_type=mode.value,
+                subgraph=None
+            )
     
     async def _synthesize_answer(
         self,
@@ -252,9 +293,24 @@ class CogneeEngine:
             return f"Knowledge Graph Analysis:\n\n{entities_text}"
     
     def _extract_entities_from_results(self, results: List[Any]) -> List[Dict]:
-        """Normalize entities for response"""
+        """Extract entity information from Cognee search results"""
         entities = []
         for r in results:
+            # Try to extract from metadata first
+            if hasattr(r, 'metadata') and isinstance(r.metadata, dict):
+                if 'entities' in r.metadata:
+                    entities.extend(r.metadata['entities'])
+                    continue
+                elif 'entity_name' in r.metadata:
+                    entities.append({
+                        "id": str(hash(str(r))),
+                        "name": r.metadata['entity_name'],
+                        "type": r.metadata.get('entity_type', 'unknown'),
+                        "description": r.metadata.get('description', '')
+                    })
+                    continue
+            
+            # Fallback to attributes
             name = getattr(r, 'name', 'Unknown')
             if name == 'Unknown' and hasattr(r, 'text'):
                 name = r.text[:50]
@@ -266,6 +322,46 @@ class CogneeEngine:
                 "description": getattr(r, 'description', '')
             })
         return entities
+    
+    def _build_evidence_paths(self, search_results: List) -> List[List[Dict]]:
+        """Build graph traversal paths as evidence from search results"""
+        paths = []
+        for result in search_results:
+            # Check if result contains graph path information
+            if hasattr(result, 'graph_path'):
+                paths.append(result.graph_path)
+            elif isinstance(result, dict) and 'path' in result:
+                paths.append(result['path'])
+        return paths
+    
+    def _calculate_confidence(self, search_results: List, evidence_paths: List) -> float:
+        """Calculate confidence score based on graph evidence"""
+        if not search_results:
+            return 0.0
+        
+        # More evidence paths = higher confidence
+        path_score = min(len(evidence_paths) / 3.0, 1.0) * 0.4
+        
+        # Number of results
+        result_score = min(len(search_results) / 5.0, 1.0) * 0.6
+        
+        return path_score + result_score
+    
+    async def _extract_subgraph(self, entities: List[Dict]) -> Dict:
+        """Extract subgraph for visualization from entities"""
+        try:
+            from app.services.neo4j_service import neo4j_service
+            
+            # Get limited graph data for visualization
+            graph_data = await neo4j_service.get_graph_data(limit=20)
+            
+            return {
+                "nodes": graph_data.get("nodes", []),
+                "links": graph_data.get("edges", [])
+            }
+        except Exception as e:
+            logger.error(f"Failed to extract subgraph: {e}")
+            return {"nodes": [], "links": []}
     
     # ==================== SPECIALIZED ANALYSES ====================
     
@@ -320,7 +416,79 @@ class CogneeEngine:
             "engine": "cognee",
             "version": "0.5.2"
         }
+    
+    # ==================== GRAPH API METHODS ====================
+    
+    async def get_graph_statistics(self) -> Dict[str, Any]:
+        """
+        Get knowledge graph statistics from Neo4j
+        
+        Returns:
+            Dict with entity_count, relationship_count, document_count
+        """
+        try:
+            logger.info("Fetching graph statistics from Neo4j")
+            
+            # Use Neo4j service for real queries
+            from app.services.neo4j_service import neo4j_service
+            
+            stats = await neo4j_service.get_graph_statistics()
+            
+            logger.info(f"Graph statistics: {stats}")
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Failed to get graph statistics: {e}")
+            # Return zeros on error
+            return {
+                "entity_count": 0,
+                "relationship_count": 0,
+                "document_count": 0
+            }
+    
+    async def get_graph_data(
+        self,
+        limit: int = 100,
+        document_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get graph nodes and edges for visualization from Neo4j
+        
+        Args:
+            limit: Maximum number of nodes to return
+            document_id: Optional document ID to filter by
+            
+        Returns:
+            Dict with 'nodes' and 'edges' lists
+        """
+        try:
+            logger.info(f"Fetching graph data (limit={limit}, document_id={document_id})")
+            
+            # Use Neo4j service for real queries
+            from app.services.neo4j_service import neo4j_service
+            
+            graph_data = await neo4j_service.get_graph_data(
+                limit=limit,
+                document_id=document_id
+            )
+            
+            logger.info(f"Returning {len(graph_data.get('nodes', []))} nodes and {len(graph_data.get('edges', []))} edges")
+            
+            return graph_data
+            
+        except Exception as e:
+            logger.error(f"Failed to get graph data: {e}")
+            return {
+                "nodes": [],
+                "edges": []
+            }
 
 
 # Singleton instance
 cognee_engine = CogneeEngine()
+
+
+# Dependency injection for FastAPI
+def get_cognee_engine() -> CogneeEngine:
+    """Get Cognee engine instance for dependency injection"""
+    return cognee_engine

@@ -103,6 +103,38 @@ async def upload_document(request: Request, response: Response, file: UploadFile
                 # CRITICAL: Save vector store to disk so it persists
                 vector_store.save_index()
                 
+                # Process with Cognee for knowledge graph
+                logger.info(f"🧠 Processing with Cognee: doc_id={document.id}")
+                try:
+                    from app.services.cognee_engine import cognee_engine
+                    
+                    document_graph = await cognee_engine.ingest_document(
+                        document_text=text,
+                        document_id=str(document.id),
+                        metadata={
+                            "filename": file.filename,
+                            "upload_date": document.created_at.isoformat(),
+                            "mime_type": file.content_type
+                        }
+                    )
+                    
+                    # Update document with graph stats
+                    document.extra_data = {
+                        "graph_stats": {
+                            "entities": document_graph.entity_count,
+                            "relationships": document_graph.relationship_count,
+                            "domain_type": document_graph.domain_type
+                        }
+                    }
+                    logger.info(f"✅ Cognee processing complete: {document_graph.entity_count} entities, {document_graph.relationship_count} relationships")
+                    
+                except Exception as cognee_error:
+                    logger.error(f"⚠️ Cognee processing failed (non-fatal): {cognee_error}", exc_info=True)
+                    # Don't fail the whole upload if Cognee fails
+                    if not document.extra_data:
+                        document.extra_data = {}
+                    document.extra_data["cognee_error"] = str(cognee_error)
+                
                 document.status = "completed"
                 logger.info(f"✅ DOCUMENT INDEXED SUCCESSFULLY: {len(text)} chars, doc_id={document.id}, chunks={len(text)//300}")
             except Exception as index_error:

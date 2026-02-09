@@ -8,7 +8,7 @@ from app.cognee_setup import COGNEE_ROOT, verify_cognee_setup
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import documents, chat, jobs
+from app.routes import documents, chat, jobs, graph
 from app.db.database import Base, engine, wait_for_db
 from app.core.logging_config import configure_logging, get_logger
 from app.core.rate_limiter import limiter, rate_limit_exceeded_handler
@@ -73,6 +73,7 @@ app.add_middleware(
 app.include_router(documents.router)
 app.include_router(chat.router)
 app.include_router(jobs.router)
+app.include_router(graph.router)
 
 @app.get("/")
 def root():

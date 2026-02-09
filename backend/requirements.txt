@@ -40,6 +40,7 @@ tavily-python>=0.3.0
 
 # Graph RAG Core
 cognee[neo4j]==0.5.2
+neo4j>=5.14.0
 networkx>=3.1.0
 huggingface-hub>=0.20.0
 fastapi-users>=14.0.1
