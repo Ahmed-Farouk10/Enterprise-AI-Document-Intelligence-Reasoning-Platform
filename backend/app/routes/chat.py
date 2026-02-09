@@ -220,7 +220,7 @@ async def send_message(
     )
     document_text = retrieval_data["full_context"]
     
-    # 5. SAFETY GATE: No document = No generationn
+    # 5. SAFETY GATE: No document = No generationnn
     if not document_text or len(document_text.strip()) < 50:
         return _create_error_response(
             session_id=session_id,
