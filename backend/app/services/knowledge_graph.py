@@ -62,5 +62,5 @@ class KnowledgeGraphService:
             logger.error(f"Graph search failed: {e}")
             return []
 
-# Singleton
+# Singletonn
 kg_service = KnowledgeGraphService()
