@@ -1,26 +1,10 @@
 # FastAPI Main Application
 
-# ===== CRITICAL: Configure Cognee Path BEFORE Any Imports =====
-# Cognee initializes its database path on import, so we MUST set this first
-import os
-import sys
-
-# Detect writable directory (HuggingFace Spaces / Docker)
-if os.getenv("HF_HOME"):
-    COGNEE_ROOT = os.path.join(os.getenv("HF_HOME"), "cognee_data")
-elif os.path.exists("/app"):
-    # Docker environment
-    COGNEE_ROOT = "/app/.cognee_data"
-else:
-    # Local development
-    COGNEE_ROOT = os.path.join(os.getcwd(), ".cognee_system")
-
-# Create directory and set environment variable BEFORE Cognee imports
-os.makedirs(COGNEE_ROOT, exist_ok=True)
-os.environ["COGNEE_ROOT_DIR"] = COGNEE_ROOT
-
-print(f"✅ Cognee configured to use: {COGNEE_ROOT}")
-# ===============================================================
+# ===== CRITICAL: Configure Cognee Path BEFORE Any Other Imports =====
+# Import cognee_setup first - it configures environment variables
+# BEFORE Cognee library initializes its paths
+from app.cognee_setup import COGNEE_ROOT, verify_cognee_setup
+# ====================================================================
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +13,7 @@ from app.db.database import Base, engine, wait_for_db
 from app.core.logging_config import configure_logging, get_logger
 from app.core.rate_limiter import limiter, rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+import os
 import logging
 import asyncio
 

@@ -436,7 +436,7 @@ async def _get_retrieved_context(query: str, depth: str, document_ids: List[str]
         
         try:
             # Use traditional vector search as backup
-            vector_results = vector_store.search(query, k=5)
+            vector_results = vector_store.retrieve_with_citations(query, k=5)
             
             if not vector_results or len(vector_results) == 0:
                 return {
