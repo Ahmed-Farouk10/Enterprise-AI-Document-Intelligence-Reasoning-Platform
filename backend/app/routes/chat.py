@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from app.services.llm_service import LLMService, AnalysisConfig, llm_service
-from app.services.llm_service import LLMService, AnalysisConfig, llm_service
 from app.db.database import get_db, SessionLocal
 from app.db.service import DatabaseService
 from app.services.cache import cache_service
@@ -423,20 +422,53 @@ async def _get_retrieved_context(query: str, depth: str, document_ids: List[str]
         if entities_context:
             context_parts.append(f"\nRELEVANT ENTITIES:\n{entities_context}")
             
+        logger.info(f"✅ Cognee retrieval successful (confidence: {result.confidence_score})")
         return {
             "full_context": "\n\n".join(context_parts),
             "document_name": "Knowledge Graph",
             "confidence": result.confidence_score,
-            "entities": result.entities_involved
+            "entities": result.entities_involved,
+            "retrieval_method": "cognee"
         }
     except Exception as e:
-        logger.error(f"Cognee retrieval failed: {e}")
-        return {
-            "full_context": "Analysis unavailable. Graph reasoning engine encountered an error.",
-            "document_name": "Error",
-            "confidence": 0.0,
-            "entities": []
-        }
+        # FALLBACK: Use vector store if Cognee fails
+        logger.warning(f"⚠️ Cognee retrieval failed: {e}. Falling back to vector store.")
+        
+        try:
+            # Use traditional vector search as backup
+            vector_results = vector_store.search(query, k=5)
+            
+            if not vector_results or len(vector_results) == 0:
+                return {
+                    "full_context": "No relevant document context found. Please upload a document first.",
+                    "document_name": "Error",
+                    "confidence": 0.0,
+                    "entities": [],
+                    "retrieval_method": "none"
+                }
+            
+            # Format vector store results
+            context_parts = []
+            for result in vector_results:
+                context_parts.append(f"[Document: {result.get('doc_name', 'Unknown')}]\n{result.get('content', '')}")
+            
+            logger.info(f"✅ Vector store fallback successful ({len(vector_results)} chunks retrieved)")
+            return {
+                "full_context": "\n\n---\n\n".join(context_parts),
+                "document_name": vector_results[0].get('doc_name', 'Unknown'),
+                "confidence": 0.75,  # Lower confidence for vector-only results
+                "entities": [],
+                "retrieval_method": "vector_store"
+            }
+        except Exception as vector_error:
+            logger.error(f"❌ Both Cognee and vector store failed: {vector_error}")
+            return {
+                "full_context": "System error: Unable to retrieve document context. Please try again.",
+                "document_name": "Error",
+                "confidence": 0.0,
+                "entities": [],
+                "retrieval_method": "error"
+            }
 
 
 def _handle_scoring_intent(llm: LLMService, system_prompt: str, context: str, question: str) -> str:
