@@ -207,7 +207,12 @@ async def send_message(
         content=message_data.content
     )
     
-    # 3. Retrieve document context (Cognee Graph Reasoning)
+    # 3. Classify and configure analysis (MOVED UP)
+    intent = llm.classify_intent(message_data.content)
+    depth = llm.classify_depth(message_data.content)
+    scope = llm.detect_scope(message_data.content)
+    
+    # 4. Retrieve document context (Cognee Graph Reasoning)
     retrieval_data = await _get_retrieved_context(
         message_data.content, 
         depth=depth,
@@ -215,19 +220,14 @@ async def send_message(
     )
     document_text = retrieval_data["full_context"]
     
-    # 4. SAFETY GATE: No document = No generation
+    # 5. SAFETY GATE: No document = No generation
     if not document_text or len(document_text.strip()) < 50:
         return _create_error_response(
             session_id=session_id,
-            content=" No relevant document context found. Please ensure you have uploaded a document.",
+            content="⚠️ No relevant document context found. Please ensure you have uploaded a document.",
             db=db
         )
-    
-    # 5. Classify and configure analysis
-    intent = llm.classify_intent(message_data.content)
-    depth = llm.classify_depth(message_data.content)
-    scope = llm.detect_scope(message_data.content)
-    
+
     config = AnalysisConfig(
         intent=intent,
         depth=depth,
@@ -304,6 +304,11 @@ async def stream_message(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
+    # Configure analysis (MOVED UP)
+    intent = llm.classify_intent(message_data.content)
+    depth = llm.classify_depth(message_data.content)
+    scope = llm.detect_scope(message_data.content)
+    
     # Get document (Cognee Graph Reasoning)
     retrieval_data = await _get_retrieved_context(
         message_data.content, 
@@ -324,12 +329,7 @@ async def stream_message(
             db, session_id, "user", message_data.content
         )
     )
-    
-    # Configure analysis
-    intent = llm.classify_intent(message_data.content)
-    depth = llm.classify_depth(message_data.content)
-    scope = llm.detect_scope(message_data.content)
-    
+
     config = AnalysisConfig(
         intent=intent,
         depth=depth,
