@@ -49,7 +49,9 @@ class LLMService:
     DEPTH_IMPROVEMENT = "IMPROVEMENT"
     
     def __init__(self):
-        self.model_name = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
+        # TIER 2 UPGRADE: Phi-3-Mini (3.8B) for better instruction adherence
+        # Previous: Qwen/Qwen2.5-1.5B-Instruct (too weak, hallucinated despite Tier 1 fixes)
+        self.model_name = os.getenv("LLM_MODEL", "microsoft/Phi-3-mini-4k-instruct")
         self.tokenizer: Optional[AutoTokenizer] = None
         self.model: Optional[AutoModelForCausalLM] = None
         self._model_lock = threading.Lock()

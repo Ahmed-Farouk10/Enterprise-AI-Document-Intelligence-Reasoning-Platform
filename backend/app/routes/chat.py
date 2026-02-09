@@ -15,6 +15,7 @@ from app.core.rate_limiter import limiter
 from app.services.retreival import vector_store
 from app.services.knowledge_graph import kg_service
 from app.services.cognee_engine import cognee_engine, AnalysisMode, GraphQueryResult
+from app.services.verification_service import get_verification_service
 import json
 
 logger = logging.getLogger(__name__)
@@ -382,8 +383,41 @@ async def stream_message(
                 full_response += token
                 yield _sse_event("token", token)
             
+            # TIER 3: Post-generation verification (hallucination detection)
+            yield _sse_event("status", "🔍 Verifying response against source context...")
+            
+            verification_service = get_verification_service()
+            verification_report = verification_service.verify_response(
+                response=full_response,
+                context=document_text,  # Use full context, not just scoped
+                include_evidence=False  # Don't send evidence to client (too verbose)
+            )
+            
+            # Log verification results
+            logger.info(
+                f"📊 Verification: {verification_report['overall_score']}% | "
+                f"Verified: {len(verification_report['verified_facts'])} | "
+                f"Hallucinated: {len(verification_report['hallucinated_facts'])}"
+            )
+            
+            # Add warning message if hallucinations detected
+            final_response = full_response
+            if verification_report['flagged']:
+                warning = verification_service.format_warning_message(verification_report)
+                if warning:
+                    final_response = f"{full_response}\n\n{warning}"
+                    # Send additional warning event
+                    yield _sse_event("warning", warning)
+            
+            # Update document context with verification info
+            document_context["verification"] = {
+                "score": verification_report['overall_score'],
+                "flagged": verification_report['flagged'],
+                "hallucinated_count": len(verification_report['hallucinated_facts'])
+            }
+            
             # Completion
-            yield _sse_event("done", full_response, document_context)
+            yield _sse_event("done", final_response, document_context)
             
             # Background save with NEW session (thread-safe)
             def _save_background():
