@@ -70,54 +70,56 @@ async def upload_document(request: Request, response: Response, file: UploadFile
         db.commit()
         db.refresh(document)
         
-        # Try Celery first, fallback to inline processing
+        # FORCED INLINE PROCESSING (Celery worker not available in HF Spaces)
+        logger.info(f"📄 Processing document inline: {file.filename}")
+        
+        # Extract text based on file type
+        text = ""
         try:
-            task = process_document_task.delay(
-                doc_id=document.id,
-                file_path=unique_filename,
-                mime_type=file.content_type,
-                filename=file.filename
-            )
-            task_id = task.id
-            processing_mode = "background"
-            logger.info("document_queued", doc_id=document.id, task_id=task_id)
-        except Exception as celery_error:
-            # Celery/Redis not available - process inline
-            logger.warning(f"Celery unavailable ({celery_error}), processing inline")
-            
-            # Extract text based on file type
-            text = ""
             if file.content_type == "text/plain":
                 with open(file_path, "r", encoding="utf-8") as f:
                     text = f.read()
+                logger.info(f"📝 Extracted {len(text)} chars from TXT")
             elif file.content_type == "application/pdf":
-                try:
-                    import pdfplumber
-                    with pdfplumber.open(file_path) as pdf:
-                        text = "\n\n".join([page.extract_text() or "" for page in pdf.pages])
-                except Exception as pdf_error:
-                    logger.error(f"PDF extraction failed: {pdf_error}")
-            
-            # Index in vector store
-            if text and len(text.strip()) > 10:
+                import pdfplumber
+                with pdfplumber.open(file_path) as pdf:
+                    text = "\n\n".join([page.extract_text() or "" for page in pdf.pages])
+                logger.info(f"📝 Extracted {len(text)} chars from PDF ({len(pdf.pages)} pages)")
+        except Exception as extraction_error:
+            logger.error(f"❌ Text extraction failed: {extraction_error}", exc_info=True)
+            document.status = "failed"
+            db.commit()
+            raise HTTPException(status_code=500, detail=f"Text extraction failed: {str(extraction_error)}")
+        
+        # Index in vector store
+        if text and len(text.strip()) > 10:
+            try:
+                logger.info(f"🔍 Indexing to vector store: doc_id={document.id}")
                 vector_store.add_document(
                     text=text,
                     doc_id=document.id,
                     doc_name=file.filename
                 )
+                # CRITICAL: Save vector store to disk so it persists
+                vector_store.save_index()
+                
                 document.status = "completed"
-                logger.info(f"✅ Document indexed inline: {len(text)} chars, doc_id={document.id}")
-            else:
+                logger.info(f"✅ DOCUMENT INDEXED SUCCESSFULLY: {len(text)} chars, doc_id={document.id}, chunks={len(text)//300}")
+            except Exception as index_error:
+                logger.error(f"❌ Vector store indexing failed: {index_error}", exc_info=True)
                 document.status = "failed"
-                logger.warning(f"No text extracted from document: {document.id}")
-            
-            db.commit()
-            task_id = "inline"
-            processing_mode = "inline"
+                db.commit()
+                raise HTTPException(status_code=500, detail=f"Indexing failed: {str(index_error)}")
+        else:
+            logger.warning(f"⚠️ No text extracted from document: {document.id} (text length: {len(text)})")
+            document.status = "failed"
         
-        logger.info("document_processed_inline", doc_id=document.id, filename=file.filename, mode=processing_mode)
+        db.commit()
+        db.refresh(document)
         
-        # Return with appropriate status
+        logger.info("document_processed_inline", doc_id=document.id, filename=file.filename, mode="inline", status=document.status)
+        
+        # Return with status
         return {
             "id": document.id,
             "filename": document.filename,
@@ -129,9 +131,10 @@ async def upload_document(request: Request, response: Response, file: UploadFile
             "status": document.status,
             "version": document.version,
             "metadata": {
-                "task_id": task_id,
-                "processing_mode": processing_mode,
-                "message": "Document processed inline." if processing_mode == "inline" else "Processing in background."
+                "task_id": "inline",
+                "processing_mode": "inline",
+                "text_length": len(text) if text else 0,
+                "message": "Document processed inline." if document.status == "completed" else "Processing failed."
             }
         }
     
