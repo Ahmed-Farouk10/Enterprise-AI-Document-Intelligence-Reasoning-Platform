@@ -63,8 +63,14 @@ def configure_cognee_paths():
     os.environ["COGNEE_ROOT_DIR"] = cognee_root
     os.environ["COGNEE_DB_PATH"] = os.path.join(cognee_root, "databases")
     os.environ["COGNEE_DATA_DIR"] = os.path.join(cognee_root, "data")
+    
+    # Database configuration - use SQLite for Cognee's internal database
+    # This is separate from the application's PostgreSQL database
+    db_path = os.path.join(cognee_root, "databases", "cognee_db.db")
+    os.environ["COGNEE_DB_PROVIDER"] = "sqlite"  # Cognee's internal DB
     os.environ["DB_PROVIDER"] = "sqlite"
     os.environ["DB_NAME"] = "cognee_db"
+    os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"  # Full SQLite URL
     
     print(f"=" * 80)
     print(f"🧠 COGNEE CONFIGURATION (AGGRESSIVE)")
@@ -73,6 +79,8 @@ def configure_cognee_paths():
     print(f"Cognee Root: {cognee_root}")
     print(f"SYSTEM_ROOT_DIRECTORY: {os.environ.get('SYSTEM_ROOT_DIRECTORY')}")
     print(f"DB Path: {os.environ.get('COGNEE_DB_PATH')}")
+    print(f"DB Provider: {os.environ.get('COGNEE_DB_PROVIDER')}")
+    print(f"Database URL: {db_path}")
     print(f"Writable: {os.access(cognee_root, os.W_OK)}")
     print(f"Exists: {os.path.exists(cognee_root)}")
     print(f"=" * 80)
