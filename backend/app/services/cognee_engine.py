@@ -90,9 +90,32 @@ class CogneeEngine:
         }
     
     async def initialize(self):
-        """Initialize Cognee graph database connection"""
-        # Cognee 0.5.2 uses env vars for configuration
-        logger.info("Cognee engine initialized via environment configuration")
+        """Initialize Cognee graph database connection and create default user"""
+        try:
+            logger.info("🔧 Initializing Cognee database...")
+            
+            # Initialize Cognee's internal database (creates tables, default user, etc.)
+            # This is required before any add() or cognify() operations
+            import cognee
+            from cognee.infrastructure.databases.relational import create_db_and_tables
+            
+            # Create database tables if they don't exist
+            await create_db_and_tables()
+            logger.info("✅ Cognee database tables created/verified")
+            
+            # Verify default user exists
+            try:
+                from cognee.modules.users.methods import get_default_user
+                default_user = await get_default_user()
+                logger.info(f"✅ Default user verified: {default_user.id if default_user else 'None'}")
+            except Exception as user_error:
+                logger.warning(f"⚠️ Could not verify default user: {user_error}")
+            
+            logger.info("✅ Cognee engine initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Cognee initialization failed: {e}")
+            logger.warning("Cognee features may not work properly")
     
     # ==================== DOCUMENT INGESTION ====================
     
