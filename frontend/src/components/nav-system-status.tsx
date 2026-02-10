@@ -1,42 +1,35 @@
 "use client"
 
-import { Activity, CheckCircle2, Zap } from "lucide-react"
-
+import { Network, Activity, Database, Cpu } from "lucide-react"
+import Link from "next/link"
 import {
     SidebarGroup,
     SidebarGroupLabel,
     SidebarMenu,
-    SidebarMenuButton,
     SidebarMenuItem,
+    SidebarMenuButton,
 } from "@/components/ui/sidebar"
 
 export function NavSystemStatus() {
     return (
-        <SidebarGroup className="mt-auto">
-            <SidebarGroupLabel>System Status</SidebarGroupLabel>
+        <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+            <SidebarGroupLabel>System</SidebarGroupLabel>
             <SidebarMenu>
                 <SidebarMenuItem>
-                    <div className="flex flex-col gap-2 p-2">
-                        <div className="flex items-center justify-between text-xs">
-                            <span className="flex items-center gap-2 text-muted-foreground">
-                                <Activity className="size-3" />
-                                Vector Store
-                            </span>
-                            <span className="flex items-center gap-1 text-emerald-500 font-medium">
-                                <CheckCircle2 className="size-3" />
-                                Online
-                            </span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs">
-                            <span className="flex items-center gap-2 text-muted-foreground">
-                                <Zap className="size-3" />
-                                Model
-                            </span>
-                            <span className="font-medium text-sidebar-foreground">
-                                BART-MNLI
-                            </span>
-                        </div>
-                    </div>
+                    <SidebarMenuButton asChild>
+                        <Link href="/knowledge-graph">
+                            <Network className="size-4" />
+                            <span>Knowledge Graph</span>
+                        </Link>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                    <SidebarMenuButton asChild>
+                        <Link href="/dashboard">
+                            <Activity className="size-4" />
+                            <span>Dashboard</span>
+                        </Link>
+                    </SidebarMenuButton>
                 </SidebarMenuItem>
             </SidebarMenu>
         </SidebarGroup>
