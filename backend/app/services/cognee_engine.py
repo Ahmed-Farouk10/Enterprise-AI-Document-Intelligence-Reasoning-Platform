@@ -152,17 +152,13 @@ class CogneeEngine:
             
             # Add document to Cognee dataset
             logger.info(f"Adding document {document_id} to Cognee dataset: {dataset_name}")
-            # Extract filename from metadata if provided
+            # Extract filename from metadata if provided (for logging only)
             filename = metadata.get("filename", "unknown") if metadata else "unknown"
             
+            # Cognee 0.5.2 add() only accepts data and dataset_name
             await cognee.add(
                 data=document_text,
-                dataset_name=dataset_name,
-                metadata={
-                    "document_id": document_id,
-                    "filename": filename,
-                    "domain": domain
-                }
+                dataset_name=dataset_name
             )
             logger.info(f"✅ Document added to Cognee dataset: {dataset_name}")
             
