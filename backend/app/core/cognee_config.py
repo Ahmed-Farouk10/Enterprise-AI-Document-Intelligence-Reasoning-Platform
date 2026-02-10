@@ -2,6 +2,13 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 import os
 
+# --- CRITICAL: SET LLM_API_KEY BEFORE COGNEE IMPORTS ---
+# Cognee checks for this during module import, so it MUST be set first
+if not os.getenv("LLM_API_KEY"):
+    # Use HF_TOKEN if available, otherwise use 'local' placeholder
+    os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN", "local")
+    print(f"🔑 LLM_API_KEY set to: {os.environ['LLM_API_KEY'][:10]}..." if len(os.environ['LLM_API_KEY']) > 10 else "local")
+
 # --- COGNEE PATH CONFIGURATION (MUST BE BEFORE IMPORT) ---
 # Detect writable directory for HuggingFace Spaces / Docker
 if os.getenv("HF_HOME"):
@@ -55,12 +62,8 @@ os.environ["COGNEE_GRAPH_URL"] = settings.COGNEE_GRAPH_URL
 os.environ["COGNEE_VECTOR_DB_TYPE"] = settings.COGNEE_VECTOR_DB_TYPE
 os.environ["COGNEE_VECTOR_DB_URL"] = settings.COGNEE_VECTOR_DB_URL
 
-# CRITICAL: Cognee requires LLM_API_KEY even for local/HuggingFace models
-# Set to 'local' or any non-empty value to bypass API key check
-if not os.getenv("LLM_API_KEY"):
-    os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN", "local")
-
-if settings.LLM_API_KEY:
+# Update LLM_API_KEY if explicitly provided in settings
+if settings.LLM_API_KEY and settings.LLM_API_KEY != "local":
     os.environ["LLM_API_KEY"] = settings.LLM_API_KEY
 if settings.EMBEDDING_API_KEY:
     os.environ["EMBEDDING_API_KEY"] = settings.EMBEDDING_API_KEY
