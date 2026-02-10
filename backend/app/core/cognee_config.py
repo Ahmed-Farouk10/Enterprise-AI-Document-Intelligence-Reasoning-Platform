@@ -48,12 +48,22 @@ settings = CogneeSettings()
 
 # Configure Cognee environment variables
 # These are picked up by Cognee's internal configuration
-os.environ["GRAPH_DATABASE_URL"] = settings.NEO4J_URI
-os.environ["GRAPH_DATABASE_USERNAME"] = settings.NEO4J_USER
-os.environ["GRAPH_DATABASE_PASSWORD"] = settings.NEO4J_PASSWORD
-os.environ["VECTOR_DB_URL"] = settings.COGNEE_VECTOR_DB_URL
-os.environ["LLM_PROVIDER"] = settings.LLM_PROVIDER
-os.environ["LLM_MODEL"] = settings.LLM_MODEL
+os.environ["COGNEE_LLM_PROVIDER"] = settings.LLM_PROVIDER
+os.environ["COGNEE_LLM_MODEL"] = settings.LLM_MODEL
+os.environ["COGNEE_GRAPH_DB_TYPE"] = settings.COGNEE_GRAPH_DB_TYPE
+os.environ["COGNEE_GRAPH_URL"] = settings.COGNEE_GRAPH_URL
+os.environ["COGNEE_VECTOR_DB_TYPE"] = settings.COGNEE_VECTOR_DB_TYPE
+os.environ["COGNEE_VECTOR_DB_URL"] = settings.COGNEE_VECTOR_DB_URL
+
+# CRITICAL: Cognee requires LLM_API_KEY even for local/HuggingFace models
+# Set to 'local' or any non-empty value to bypass API key check
+if not os.getenv("LLM_API_KEY"):
+    os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN", "local")
+
+if settings.LLM_API_KEY:
+    os.environ["LLM_API_KEY"] = settings.LLM_API_KEY
+if settings.EMBEDDING_API_KEY:
+    os.environ["EMBEDDING_API_KEY"] = settings.EMBEDDING_API_KEY
 
 # Set Cognee root directory for data storage
 COGNEE_ROOT_DIR = os.getenv("COGNEE_ROOT_DIR", "/app/cognee_data")

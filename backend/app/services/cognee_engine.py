@@ -200,10 +200,8 @@ class CogneeEngine:
         try:
             # Execute graph search via Cognee
             logger.info(f"Querying Cognee graph: {question}")
-            search_results = await cognee.search(
-                query_text=question,
-                search_type="INSIGHTS"  # Use INSIGHTS for graph-based answers
-            )
+            # Note: Cognee 0.5.2 search() only accepts query_text parameter
+            search_results = await cognee.search(query_text=question)
             
             # Extract entities from search results
             entities = self._extract_entities_from_results(search_results)
