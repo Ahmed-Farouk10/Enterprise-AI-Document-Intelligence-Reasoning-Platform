@@ -10,6 +10,19 @@ import os
 import sys
 
 # =============================================================================
+# CRITICAL: SET LLM_API_KEY BEFORE ANYTHING ELSE
+# =============================================================================
+# Cognee checks for LLM_API_KEY during import and will fail if not set
+# This MUST be the very first thing we do
+if not os.getenv("LLM_API_KEY"):
+    # Use HF_TOKEN if available, otherwise use 'local' placeholder
+    llm_key = os.getenv("HF_TOKEN", "local")
+    os.environ["LLM_API_KEY"] = llm_key
+    print(f"🔑 LLM_API_KEY set to: {llm_key[:10]}..." if len(llm_key) > 10 else "🔑 LLM_API_KEY set to: local")
+else:
+    print(f"🔑 LLM_API_KEY already set: {os.environ['LLM_API_KEY'][:10]}...")
+
+# =============================================================================
 # COGNEE PATH CONFIGURATION (AGGRESSIVE)
 # =============================================================================
 
