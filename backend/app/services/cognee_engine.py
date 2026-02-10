@@ -46,6 +46,17 @@ class GraphQueryResult:
 
 
 @dataclass
+class GraphIngestionResult:
+    """Result from Cognee document ingestion"""
+    success: bool
+    entity_count: int
+    relationship_count: int
+    domain_type: str
+    dataset_name: str
+    error_message: Optional[str] = None
+
+
+@dataclass
 class DocumentGraph:
     """Represents a document's knowledge graph structure"""
     document_id: str
@@ -141,6 +152,9 @@ class CogneeEngine:
             
             # Add document to Cognee dataset
             logger.info(f"Adding document {document_id} to Cognee dataset: {dataset_name}")
+            # Extract filename from metadata if provided
+            filename = metadata.get("filename", "unknown") if metadata else "unknown"
+            
             await cognee.add(
                 data=document_text,
                 dataset_name=dataset_name,
