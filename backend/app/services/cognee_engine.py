@@ -109,39 +109,62 @@ class CogneeEngine:
         try:
             # Auto-detect domain if not specified
             if document_type == "auto_detect":
-                document_type = await self._detect_domain(document_text)
+                domain = await self._detect_domain(document_text)
+            else:
+                domain = document_type
             
             # Create dataset name for this document
             dataset_name = f"doc_{document_id}"
             
-            # Add document to Cognee with metadata
+            # Add document to Cognee dataset
             logger.info(f"Adding document {document_id} to Cognee dataset: {dataset_name}")
             await cognee.add(
                 data=document_text,
-                dataset_name=dataset_name
+                dataset_name=dataset_name,
+                metadata={
+                    "document_id": document_id,
+                    "filename": filename,
+                    "domain": domain
+                }
             )
+            logger.info(f"✅ Document added to Cognee dataset: {dataset_name}")
             
-            # Build knowledge graph using Cognee
-            logger.info(f"Building knowledge graph for document: {document_id}")
-            await cognee.cognify(datasets=[dataset_name])
+            # Build knowledge graph with timeout
+            logger.info(f"🔨 Building knowledge graph for {dataset_name}...")
+            try:
+                # Set a reasonable timeout for graph building (60 seconds)
+                await asyncio.wait_for(
+                    cognee.cognify(datasets=[dataset_name]),
+                    timeout=60.0
+                )
+                logger.info(f"✅ Knowledge graph built successfully for {dataset_name}")
+            except asyncio.TimeoutError:
+                logger.error(f"⏱️ Cognee graph building timed out after 60s for {dataset_name}")
+                raise RuntimeError("Cognee graph building timed out - document may be too large or LLM is slow")
             
             # Get graph statistics from Neo4j
             stats = await self._get_graph_stats_from_neo4j(document_id)
             
-            logger.info(f"Document {document_id} ingested successfully: {stats['entity_count']} entities, {stats['relationship_count']} relationships")
+            logger.info(f"✅ Cognee ingestion complete: {stats.get('entity_count', 0)} entities, {stats.get('relationship_count', 0)} relationships")
             
-            return DocumentGraph(
-                document_id=document_id,
-                entity_count=stats["entity_count"],
-                relationship_count=stats["relationship_count"],
-                temporal_facts=stats.get("temporal_facts", []),
-                domain_type=document_type,
-                graph_stats=stats
+            return GraphIngestionResult(
+                success=True,
+                entity_count=stats.get("entity_count", 0),
+                relationship_count=stats.get("relationship_count", 0),
+                domain_type=domain,
+                dataset_name=dataset_name
             )
             
         except Exception as e:
-            logger.error(f"Failed to ingest document {document_id}: {e}")
-            raise RuntimeError(f"Cognee ingestion failed: {str(e)}")
+            logger.error(f"Failed to ingest document {document_id}: {str(e)}")
+            return GraphIngestionResult(
+                success=False,
+                entity_count=0,
+                relationship_count=0,
+                domain_type=document_type,
+                dataset_name=f"doc_{document_id}",
+                error_message=str(e)
+            )
     
     async def _detect_domain(self, text: str) -> str:
         """Auto-detect document domain using Cognee classification"""
