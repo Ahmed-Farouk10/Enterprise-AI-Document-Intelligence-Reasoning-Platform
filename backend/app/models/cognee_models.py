@@ -10,7 +10,7 @@ https://docs.cognee.ai/guides/custom-data-models
 """
 
 from typing import List, Dict, Any, Optional
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, model_validator
 from datetime import datetime
 
 try:
@@ -48,6 +48,17 @@ class Skill(DataPoint):
         default={"index_fields": ["name", "category", "level"]},
         description="Metadata for vector indexing"
     )
+
+    @model_validator(mode = "before")
+    @classmethod
+    def convert_string_to_skill(cls, data: Any) -> Any:
+        """
+        Normalize skill format. 
+        If LLM returns a string, convert to object with 'name' field.
+        """
+        if isinstance(data, str):
+            return {"name": data}
+        return data
 
 
 class Organization(DataPoint):
@@ -138,6 +149,16 @@ class WorkExperience(DataPoint):
         default_factory=list,
         description="Skills applied in this role"
     )
+
+    @model_validator(mode = "before")
+    @classmethod
+    def normalize_experience(cls, data: Any) -> Any:
+        """Ensure responsibilities and skills_used are always lists of strings."""
+        if isinstance(data, dict):
+            for field in ["responsibilities", "skills_used"]:
+                if field in data and isinstance(data[field], str):
+                    data[field] = [data[field]]
+        return data
     
     metadata: Dict[str, Any] = Field(
         default={"index_fields": ["title", "organization"]},
@@ -218,6 +239,16 @@ class Resume(DataPoint):
         default_factory=list,
         description="Languages spoken (e.g., 'English (Native)', 'Spanish (Fluent)')"
     )
+
+    @model_validator(mode = "before")
+    @classmethod
+    def normalize_resume_lists(cls, data: Any) -> Any:
+        """Ensure certifications and languages are always lists of strings."""
+        if isinstance(data, dict):
+            for field in ["certifications", "languages"]:
+                if field in data and isinstance(data[field], str):
+                    data[field] = [data[field]]
+        return data
     
     # Metadata
     total_years_experience: Optional[int] = Field(
