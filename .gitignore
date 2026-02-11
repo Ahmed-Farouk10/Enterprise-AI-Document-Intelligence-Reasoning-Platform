@@ -29,3 +29,14 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets
+.env
+.env.*
+
+# Cognee & Data Storage
+.cognee_system/
+cognee_data/
+.cache/
+storage/
+lancedb/
