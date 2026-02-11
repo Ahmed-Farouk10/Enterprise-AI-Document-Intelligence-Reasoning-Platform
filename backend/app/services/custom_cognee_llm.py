@@ -103,19 +103,9 @@ OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
             {"role": "user", "content": user}
         ]
         
-        if llm_service.tokenizer:
-            formatted_prompt = llm_service.tokenizer.apply_chat_template(
-                messages, 
-                tokenize=False, 
-                add_generation_prompt=True
-            )
-        else:
-            # Fallback if tokenizer not loaded (e.g. API mode)
-            formatted_prompt = f"System: {system}\n\nUser: {user}\n\nAssistant:"
-
         return await asyncio.to_thread(
             llm_service.generate, 
-            prompt=formatted_prompt,
+            prompt=messages, 
             max_tokens=2048,
             temperature=0.1 # Low temp for extraction
         )

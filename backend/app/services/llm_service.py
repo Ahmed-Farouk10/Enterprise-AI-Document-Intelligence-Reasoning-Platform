@@ -217,31 +217,36 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
     
     def _generate_via_inference_api(
         self,
-        prompt: str,
+        prompt: Any,
         max_tokens: int = 1024,
         temperature: float = 0.3,
         top_p: float = 0.9
     ) -> str:
         """
         Generate using HuggingFace Inference API (for HF Spaces deployment).
-        Fallback when model can't be loaded locally due to memory constraints.
+        Uses chat_completion (conversational task) for better compatibility.
         """
         try:
             from huggingface_hub import InferenceClient
             
             client = InferenceClient(token=os.getenv("HF_TOKEN"))
             
-            # Use the same model via Inference API
-            response = client.text_generation(
-                prompt,
+            # Format inputs as messages for the 'conversational' task
+            if isinstance(prompt, list):
+                messages = prompt
+            else:
+                messages = [{"role": "user", "content": str(prompt)}]
+            
+            # Use chat_completion for the conversational task
+            response = client.chat_completion(
+                messages=messages,
                 model=self.model_name,
-                max_new_tokens=max_tokens,
+                max_tokens=max_tokens,
                 temperature=temperature,
-                top_p=top_p,
-                return_full_text=False
+                top_p=top_p
             )
             
-            return response
+            return response.choices[0].message.content
             
         except Exception as e:
             logger.error(f"HF Inference API failed: {e}")
@@ -466,7 +471,7 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
 
     def generate(
         self,
-        prompt: str,
+        prompt: Any,
         max_tokens: int = 1024,
         temperature: float = 0.3,  # Lower = more deterministic
         top_p: float = 0.9
@@ -475,7 +480,7 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         Generate completion using local model OR HuggingFace Inference API.
         
         Args:
-            prompt: The prompt to complete
+            prompt: Either a string or a list of message dicts
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature (0.0-1.0)
             top_p: Nucleus sampling parameter
@@ -490,16 +495,21 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         
         # If model not loaded (HF Spaces), use Inference API
         if self.model is None:
-            logger.info("Using HuggingFace Inference API for generation")
+            logger.info("Using HuggingFace Inference API with chat completions")
             return self._generate_via_inference_api(prompt, max_tokens, temperature, top_p)
         
         # Local generation
         logger.debug(f"Generating with temperature={temperature}, max_tokens={max_tokens}")
         
-        # Apply chat template (assuming 'prompt' is already formatted as a single string for the model)
-        # If 'prompt' is expected to be a list of messages, this part needs adjustment.
-        # Based on the instruction, 'prompt' is a string, so we'll treat it as the direct input text.
-        text = prompt # The prompt is already the full text to be sent to the model
+        if isinstance(prompt, list):
+            # Apply template if messages passed
+            text = self.tokenizer.apply_chat_template(
+                prompt,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+        else:
+            text = str(prompt)
 
         inputs = self.tokenizer(
             text,
