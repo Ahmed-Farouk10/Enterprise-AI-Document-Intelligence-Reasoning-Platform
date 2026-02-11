@@ -75,6 +75,7 @@ def configure_cognee_paths():
     
     # Use small, fast embedding model (22MB instead of 500MB+)
     os.environ["COGNEE_EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"
+    os.environ["COGNEE_EMBEDDING_PROVIDER"] = "fastembed"  # Force local embeddings (no API key needed)
     os.environ["COGNEE_VECTOR_DB"] = "lancedb"  # Use local vector DB
     
     print(f"📦 Model cache directory: {models_dir}")
