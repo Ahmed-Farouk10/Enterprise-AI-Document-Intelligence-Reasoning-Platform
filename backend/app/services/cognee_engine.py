@@ -20,7 +20,28 @@ except ImportError as e:
     logging.error(f"Failed to import Cognee: {e}")
     logging.warning("Cognee not installed or dependency missing. Run: pip install cognee[neo4j]")
 
-from app.core.cognee_config import settings
+from app.core import settings
+from app.core.logging_config import get_logger
+from app.core.cognee_config import settings as cognee_settings
+
+# CRITICAL FIX: Monkey-patch Cognee's LLM connection test
+# The test hangs for 30+ seconds on HF Spaces when no valid HF_TOKEN is available
+# This bypasses the test entirely to prevent pipeline timeouts
+try:
+    from cognee.infrastructure.llm import utils as llm_utils
+    
+    async def _noop_llm_test():
+        """No-op replacement for test_llm_connection on HF Spaces"""
+        logger = get_logger(__name__)
+        logger.info("⚡ Skipping LLM connection test (monkey-patched)")
+        return True
+    
+    # Only patch on HF Spaces or when no HF_TOKEN
+    if os.getenv("HF_HOME") or not os.getenv("HF_TOKEN"):
+        llm_utils.test_llm_connection = _noop_llm_test
+        print("✅ Cognee LLM test monkey-patched successfully")
+except ImportError:
+    pass  # Cognee not installed yet
 
 logger = logging.getLogger(__name__)
 
@@ -584,8 +605,9 @@ class CogneeEngine:
             # Try using cognee.search to get graph data
             try:
                 # Use cognee's search API to estimate graph size
+                # SearchType options: SUMMARIES, CHUNKS, NODES
                 search_result = await cognee.search(
-                    SearchType.INSIGHTS,
+                    SearchType.SUMMARIES,  # Get document summaries
                     query_text="*",  # Query all
                     user=User(id=str(settings.DEFAULT_USER_ID))
                 )
@@ -635,7 +657,7 @@ class CogneeEngine:
             # Try using cognee's search API to get graph entities
             try:
                 search_result = await cognee.search(
-                    SearchType.INSIGHTS,
+                    SearchType.SUMMARIES,  # Get document summaries/nodes
                     query_text="*" if not document_id else f"document:{document_id}",
                     user=User(id=str(settings.DEFAULT_USER_ID))
                 )
