@@ -106,6 +106,16 @@ class CogneeEngine:
         self.extraction_model = cognee_settings.EXTRACTION_MODEL
         self.graph_db_url = cognee_settings.GRAPH_DATABASE_URL
         
+        # Force FastEmbed embedding engine to avoid LiteLLM auth errors
+        try:
+            from cognee.infrastructure.llm.embeddings.FastEmbedEmbeddingEngine import FastEmbedEmbeddingEngine
+            cognee.config.embedding_engine = FastEmbedEmbeddingEngine()
+            print("✅ Forced FastEmbed embedding engine (no API key needed)")
+        except ImportError:
+            print("⚠️ fastembed not installed, falling back to default")
+        except Exception as e:
+            print(f"⚠️ Failed to force FastEmbed engine: {e}")
+        
         # Analysis configurations per domain
         self.domain_configs = {
             "resume": {
