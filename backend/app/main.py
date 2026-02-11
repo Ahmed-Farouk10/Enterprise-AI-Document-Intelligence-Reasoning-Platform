@@ -1,8 +1,23 @@
 # FastAPI Main Application
+import os
+import pathlib
+import sys
 
 # ===== CRITICAL: Configure Cognee Path BEFORE Any Other Imports =====
-# Import cognee_setup first - it configures environment variables
-# BEFORE Cognee library initializes its paths
+# Force Cognee to use writable directory (fix for HF Spaces permissions)
+# Default is site-packages which is read-only
+cognee_root = "/app/.cache/cognee_data"
+os.environ["COGNEE_ROOT"] = cognee_root
+os.environ["COGNEE_ROOT_DIR"] = cognee_root 
+os.environ["SYSTEM_ROOT_DIRECTORY"] = cognee_root
+os.environ["COGNEE_DATA_STORAGE"] = f"{cognee_root}/data_storage"
+os.environ["COGNEE_ANON_ID_PATH"] = "/tmp/.cognee_anon_id"  # Fix telemetry warning
+
+# Create directories explicitly
+pathlib.Path(f"{cognee_root}/data_storage").mkdir(parents=True, exist_ok=True)
+pathlib.Path(f"{cognee_root}/databases").mkdir(parents=True, exist_ok=True)
+
+# NOW import cognee setup
 from app.cognee_setup import COGNEE_ROOT, verify_cognee_setup
 # ====================================================================
 

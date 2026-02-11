@@ -120,20 +120,32 @@ async def upload_document(request: Request, response: Response, file: UploadFile
                         }
                     )
                     
-                    # Update document with extracted entity stats
-                    # GraphIngestionResult is an object, not a dict
+                    # Handle response (can be Resume object or dict from generic pipeline)
+                    is_success = False
+                    
                     if hasattr(document_graph, 'success') and document_graph.success:
+                         is_success = True
+                    elif isinstance(document_graph, dict) and document_graph.get('success', False):
+                         is_success = True
+                    
+                    if is_success:
+                        # Extract stats safely from either object or dict
+                        def get_val(obj, key, default):
+                            if isinstance(obj, dict):
+                                return obj.get(key, default)
+                            return getattr(obj, key, default)
+
                         document.extra_data = {
                             "graph_stats": {
-                                "entity_count": getattr(document_graph, "entity_count", 0),
-                                "document_type": getattr(document_graph, "document_type", "unknown"),
-                                "dataset_name": getattr(document_graph, "dataset_name", ""),
-                                "entities": getattr(document_graph, "entities", {})
+                                "entity_count": get_val(document_graph, "entity_count", 0),
+                                "document_type": get_val(document_graph, "document_type", "unknown"),
+                                "dataset_name": get_val(document_graph, "dataset_name", ""),
+                                "entities": get_val(document_graph, "entities", {})
                             }
                         }
                         
-                        entity_count = document_graph.get("entity_count", 0)
-                        doc_type = document_graph.get("document_type", "document")
+                        entity_count = get_val(document_graph, "entity_count", 0)
+                        doc_type = get_val(document_graph, "document_type", "document")
                         logger.info(f"✅ Cognee processing complete: {entity_count} entities extracted ({doc_type})")
                     
                 except Exception as cognee_error:

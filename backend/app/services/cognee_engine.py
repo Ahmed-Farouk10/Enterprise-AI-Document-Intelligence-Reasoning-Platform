@@ -433,6 +433,22 @@ class CogneeEngine:
             }
     
     # ==================== QUERY & REASONING ====================
+
+    async def search_documents(self, query_text: str, limit: int = 50):
+        """
+        Wrap Cognee search with correct signature to avoid API mismatches.
+        Requested Fix: Problem 5
+        """
+        try:
+            # Use 'query' not 'query_text' as parameter name
+            results = await cognee.search(
+                query=query_text,  # Correct parameter name
+                limit=limit
+            )
+            return results
+        except Exception as e:
+            logger.error(f"Search error: {e}")
+            return []
     
     async def query(
         self,
@@ -447,8 +463,8 @@ class CogneeEngine:
         try:
             # Execute graph search via Cognee
             logger.info(f"Querying Cognee graph: {question}")
-            # Note: Cognee 0.5.2 search() only accepts query_text parameter
-            search_results = await cognee.search(query_text=question)
+            # Note: Cognee 0.5.2 search() expects query=, not query_text=
+            search_results = await cognee.search(query=question)
             
             # Extract entities from search results
             entities = self._extract_entities_from_results(search_results)
@@ -704,7 +720,7 @@ class CogneeEngine:
                 # SearchType options: SUMMARIES, CHUNKS, NODES
                 search_result = await cognee.search(
                     SearchType.SUMMARIES,  # Get document summaries
-                    query_text="*",  # Query all
+                    query="*",  # Correct parameter name
                     user=User(id=str(cognee_settings.DEFAULT_USER_ID))
                 )
                 
@@ -754,7 +770,7 @@ class CogneeEngine:
             try:
                 search_result = await cognee.search(
                     SearchType.SUMMARIES,  # Get document summaries/nodes
-                    query_text="*" if not document_id else f"document:{document_id}",
+                    query="*" if not document_id else f"document:{document_id}",
                     user=User(id=str(cognee_settings.DEFAULT_USER_ID))
                 )
                 
