@@ -26,20 +26,23 @@ from app.core.cognee_config import settings as cognee_settings
 
 # CRITICAL FIX: Monkey-patch Cognee's LLM connection test
 # The test hangs for 30+ seconds on HF Spaces when no valid HF_TOKEN is available
-# This bypasses the test entirely to prevent pipeline timeouts
+# This bypasses the test ONLY when no token exists to prevent pipeline timeouts
 try:
     from cognee.infrastructure.llm import utils as llm_utils
     
     async def _noop_llm_test():
-        """No-op replacement for test_llm_connection on HF Spaces"""
+        """No-op replacement for test_llm_connection when no LLM token available"""
         logger = get_logger(__name__)
-        logger.info("⚡ Skipping LLM connection test (monkey-patched)")
+        logger.info("⚡ Skipping LLM connection test (no HF_TOKEN available)")
         return True
     
-    # Only patch on HF Spaces or when no HF_TOKEN
-    if os.getenv("HF_HOME") or not os.getenv("HF_TOKEN"):
+    # IMPORTANT: Only patch when on HF Spaces AND no valid token
+    # If HF_TOKEN exists, let the test run to validate the LLM works!
+    if os.getenv("HF_HOME") and not os.getenv("HF_TOKEN"):
         llm_utils.test_llm_connection = _noop_llm_test
-        print("✅ Cognee LLM test monkey-patched successfully")
+        print("⚙️ Cognee: LLM test disabled (no HF_TOKEN - will use basic extraction)")
+    elif os.getenv("HF_TOKEN"):
+        print(f"✅ Cognee: LLM enabled with HF Inference API (token: {os.getenv('HF_TOKEN')[:8]}...)")
 except ImportError:
     pass  # Cognee not installed yet
 
