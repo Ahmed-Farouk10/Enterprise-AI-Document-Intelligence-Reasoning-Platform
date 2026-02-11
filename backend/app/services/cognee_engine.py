@@ -115,43 +115,58 @@ class CogneeEngine:
         self.extraction_model = cognee_settings.EXTRACTION_MODEL
         self.graph_db_url = cognee_settings.GRAPH_DATABASE_URL
         
-        # Force FastEmbed to avoid LiteLLM auth errors (try multiple paths)
+        # Force Robust Local Embeddings (SentenceTransformers via wrapper)
         try:
-            # First check if fastembed package is even installed
-            import fastembed
+            # 1. Custom Wrapper using SentenceTransformers
+            # This is safer than FastEmbed because we control the implementation
+            from app.services.embeddings import SentenceTransformerEmbeddingEngine
             
-            engine_cls = None
+            # Using 'all-MiniLM-L6-v2' (small, fast, CPU friendly)
+            logger.info("Initializing custom SentenceTransformerEmbeddingEngine...")
+            local_engine = SentenceTransformerEmbeddingEngine()
             
-            # Try path 1: Standard cognee 0.5.x
+            # Force configuration
+            cognee.config.embedding_engine = local_engine
+            logger.info(f"✅ Forced Custom SentenceTransformer embedding engine (dim={local_engine.get_vector_size()})")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize SentenceTransformers: {e}")
+            logger.info("Attempting fallback to FastEmbed...")
+            
+            # 2. Fallback to FastEmbed (original logic)
             try:
-                from cognee.infrastructure.llm.embeddings.FastEmbedEmbeddingEngine import FastEmbedEmbeddingEngine
-                engine_cls = FastEmbedEmbeddingEngine
-            except ImportError:
-                pass
+                import fastembed
+                engine_cls = None
                 
-            # Try path 2: Alternative 0.5.2 structure
-            if not engine_cls:
+                # Check different import paths
                 try:
-                    from cognee.infrastructure.llm.embeddings.fastembed.FastEmbedEmbeddingEngine import FastEmbedEmbeddingEngine
+                    from cognee.infrastructure.llm.embeddings.FastEmbedEmbeddingEngine import FastEmbedEmbeddingEngine
                     engine_cls = FastEmbedEmbeddingEngine
                 except ImportError:
                     pass
 
-            if engine_cls:
-                cognee.config.embedding_engine = engine_cls()
-                logger.info("✅ Forced FastEmbed embedding engine (local)")
-            else:
-                # Last resort: Try setting string identifier if supported
-                if hasattr(cognee.config, "embedding_engine"):
-                    cognee.config.embedding_engine = "fastembed"
-                    logger.info("⚠️ Could not import class, set embedding_engine='fastembed'")
-                else:
-                    logger.warning("❌ Failed to find FastEmbed engine class in cognee")
+                if not engine_cls:
+                    try:
+                        from cognee.infrastructure.llm.embeddings.fastembed.FastEmbedEmbeddingEngine import FastEmbedEmbeddingEngine
+                        engine_cls = FastEmbedEmbeddingEngine
+                    except ImportError:
+                        pass
 
-        except ImportError:
-            logger.warning("⚠️ fastembed package not installed - pipeline may fail on HF Spaces")
-        except Exception as e:
-            logger.error(f"❌ Failed to force FastEmbed engine: {e}")
+                if engine_cls:
+                    cognee.config.embedding_engine = engine_cls()
+                    logger.info("✅ Fallback: Forced FastEmbed embedding engine")
+                else:
+                    # Last resort string
+                    if hasattr(cognee.config, "embedding_engine"):
+                        cognee.config.embedding_engine = "fastembed"
+                        logger.info("⚠️ Fallback: Set embedding_engine='fastembed'")
+                    else:
+                        logger.warning("❌ Failed to find FastEmbed engine class")
+                        
+            except ImportError:
+                logger.warning("⚠️ fastembed not installed")
+            except Exception as fe:
+                logger.error(f"❌ FastEmbed fallback also failed: {fe}")
         
         # Analysis configurations per domain
         self.domain_configs = {
