@@ -10,6 +10,7 @@ https://docs.cognee.ai/guides/custom-tasks-and-pipelines
 """
 
 import logging
+import asyncio
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
@@ -271,7 +272,8 @@ async def extract_work_history_timeline(text: str) -> List[WorkExperience]:
 async def process_resume_document(
     text: str,
     document_id: str,
-    document_type: str = "resume"
+    document_type: str = "resume",
+    timeout_seconds: int = 30
 ) -> Resume:
     """
     Professional resume processing pipeline using Cognee best practices.
@@ -318,16 +320,25 @@ async def process_resume_document(
         # Dataset name for isolation
         dataset_name = f"resume_{document_id}"
         
-        logger.info(f"📊 Running {len(tasks)}-step pipeline...")
+        logger.info(f"📊 Running {len(tasks)}-step pipeline with {timeout_seconds}s timeout...")
         
-        # Run pipeline
+        # Run pipeline with timeout
         final_result = None
-        async for result in run_pipeline(
-            tasks=tasks,
-            data=text,
-            datasets=[dataset_name]
-        ):
-            final_result = result
+        
+        try:
+            async for result in asyncio.wait_for(
+                run_pipeline(
+                    tasks=tasks,
+                    data=text,
+                    datasets=[dataset_name]
+                ),
+                timeout=timeout_seconds
+            ):
+                final_result = result
+                logger.info(f"⏳ Pipeline step completed, result type: {type(result).__name__}")
+        except asyncio.TimeoutError:
+            logger.error(f"⏱️ Pipeline timeout after {timeout_seconds}s - this is expected for large documents")
+            raise RuntimeError(f"Resume extraction timed out after {timeout_seconds}s")
         
         if final_result is None:
             raise RuntimeError("Pipeline returned no result")
