@@ -129,7 +129,7 @@ async def extract_resume_entities(text: str) -> Resume:
                     response_model=ResumeExtraction,
                     system_prompt=system_prompt
                 ),
-                timeout=30.0  # Fail fast to avoid tenacity death spiral
+                timeout=60.0  # Increased from 30s to allow for full 7B generation
             )
         except asyncio.TimeoutError:
             logger.warning("⏰ Resume extraction timed out (30s). Falling back to basic extraction.")
@@ -216,7 +216,7 @@ async def extract_skills_detailed(text: str) -> List[Skill]:
                     response_model=SkillList,
                     system_prompt=system_prompt
                 ),
-                timeout=20.0  # Skills should be faster
+                timeout=45.0  # Increased from 20s
             )
         except asyncio.TimeoutError:
             logger.warning("⏰ Skill extraction timed out (20s). Skipping detailed skills.")
@@ -288,7 +288,7 @@ async def extract_work_history_timeline(text: str) -> List[WorkExperience]:
                     response_model=WorkHistoryList,
                     system_prompt=system_prompt
                 ),
-                timeout=20.0
+                timeout=45.0
             )
         except asyncio.TimeoutError:
             logger.warning("⏰ Work history extraction timed out (20s). Skipping timeline.")
@@ -308,7 +308,7 @@ async def process_resume_document(
     text: str,
     document_id: str,
     document_type: str = "resume",
-    timeout_seconds: int = 30  # REDUCED from 120s to prevent hang
+    timeout_seconds: int = 60  # Increased from 30s
 ) -> Resume:
     """
     Direct Resume Processing Pipeline (Bypassing Cognee run_pipeline wrapper).

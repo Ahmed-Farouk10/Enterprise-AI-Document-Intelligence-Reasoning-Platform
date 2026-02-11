@@ -45,7 +45,15 @@ OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
 """
             
             # 2. detailed system prompt (Cognee usually provides one in text_input, but we reinforce)
-            full_system_prompt = f"{system_prompt}\nYou are a precise data extraction engine. Output valid JSON only."
+            full_system_prompt = f"""{system_prompt}
+You are a precise data extraction engine. Output valid JSON only.
+
+IMPORTANT:
+- Focus ONLY on non-empty data fields.
+- DO NOT populate internal fields like 'id', 'created_at', 'updated_at', 'ontology_valid', 'version', 'topological_rank', 'metadata', or 'type' UNLESS they have specific values in the source text.
+- Omit these internal fields entirely to save space and prevent truncation.
+- Ensure the JSON is complete and valid.
+"""
             
             # 3. Call local LLM service
             # Cognee passes the 'text_input' which usually contains the user content
@@ -67,47 +75,39 @@ OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
                 
             logger.debug(f"🔍 Extracted JSON: {cleaned_json[:200]}...")
             
+            # Partial JSON Recovery if truncated (Best effort)
+            if not cleaned_json.endswith('}'):
+                # Try to close open braces if it's a simple truncation
+                # But pydantic validate will likely still fail if it's mid-object
+                pass
+
             # Validate with Pydantic
             result = response_model.model_validate_json(cleaned_json)
             return result
             
         except Exception as e:
             logger.error(f"❌ Structured output generation failed: {e}")
-            logger.error(f"Response was: {response_text if 'response_text' in locals() else 'None'}")
+            # If truncation happened, log the end of the response to see where it stopped
+            if 'response_text' in locals():
+                logger.error(f"Last 100 chars of response: ...{response_text[-100:]}")
             raise e
 
     async def _generate_async(self, system: str, user: str) -> str:
         """Helper to bridge sync LLMService to async Cognee"""
         import asyncio
         
-        # We run the blocking generation in a thread
-        # Note: llm_service.generate is blocking
-        
-        # Prepare the prompt string expected by LLMService
-        # LLMService.generate expects a full prompt string or handles it internally?
-        # LLMService.generate docstring: "prompt: The prompt to complete"
-        # Qwen expects chat template. 
-        # But LLMService.generate applies template if passed raw string? 
-        # Looking at LLMService.generate (lines 499+), itTokenizes 'text'.
-        # It expects the FULL text.
-        
-        # We should format it using the tokenizer's chat template if possible, 
-        # but LLMService private _prepare_messages does that.
-        # But generate() takes a single string 'prompt'.
-        
-        # Let's verify LLMService usage. It uses tokenizer(text).
-        # So we must format the chat template OURSELVES here.
-        
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user}
         ]
         
+        # Increase max_tokens to 3072 (safe limit for many serverless providers)
+        # Previous 2048 was too tight for full resumes + Cognee boilerplate
         return await asyncio.to_thread(
             llm_service.generate, 
             prompt=messages, 
-            max_tokens=2048,
-            temperature=0.1 # Low temp for extraction
+            max_tokens=3072, 
+            temperature=0.1
         )
 
     def _clean_json(self, text: str) -> str:
