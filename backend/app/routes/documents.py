@@ -103,14 +103,16 @@ async def upload_document(request: Request, response: Response, file: UploadFile
                 # CRITICAL: Save vector store to disk so it persists
                 vector_store.save_index()
                 
-                # Process with Cognee for knowledge graph
-                logger.info(f"🧠 Processing with Cognee: doc_id={document.id}")
+                # Process with Cognee for knowledge graph (PROFESSIONAL PIPELINE)
+                logger.info(f" Processing with Cognee Professional Pipeline: doc_id={document.id}")
                 try:
                     from app.services.cognee_engine import cognee_engine
                     
-                    document_graph = await cognee_engine.ingest_document(
+                    # Use professional pipeline with structured extraction
+                    document_graph = await cognee_engine.ingest_document_professional(
                         document_text=text,
                         document_id=str(document.id),
+                        document_type="auto_detect",  # Auto-detect resume vs other
                         metadata={
                             "filename": file.filename,
                             "upload_date": document.created_at.isoformat(),
@@ -118,18 +120,23 @@ async def upload_document(request: Request, response: Response, file: UploadFile
                         }
                     )
                     
-                    # Update document with graph stats
-                    document.extra_data = {
-                        "graph_stats": {
-                            "entities": document_graph.entity_count,
-                            "relationships": document_graph.relationship_count,
-                            "domain_type": document_graph.domain_type
+                    # Update document with extracted entity stats
+                    if document_graph["success"]:
+                        document.extra_data = {
+                            "graph_stats": {
+                                "entity_count": document_graph.get("entity_count", 0),
+                                "document_type": document_graph.get("document_type", "unknown"),
+                                "dataset_name": document_graph.get("dataset_name", ""),
+                                "entities": document_graph.get("entities", {})
+                            }
                         }
-                    }
-                    logger.info(f"✅ Cognee processing complete: {document_graph.entity_count} entities, {document_graph.relationship_count} relationships")
+                        
+                        entity_count = document_graph.get("entity_count", 0)
+                        doc_type = document_graph.get("document_type", "document")
+                        logger.info(f"✅ Cognee processing complete: {entity_count} entities extracted ({doc_type})")
                     
                 except Exception as cognee_error:
-                    logger.error(f"⚠️ Cognee processing failed (non-fatal): {cognee_error}", exc_info=True)
+                    logger.error(f"⚠️ Cognee professional pipeline failed (non-fatal): {cognee_error}", exc_info=True)
                     # Don't fail the whole upload if Cognee fails
                     if not document.extra_data:
                         document.extra_data = {}

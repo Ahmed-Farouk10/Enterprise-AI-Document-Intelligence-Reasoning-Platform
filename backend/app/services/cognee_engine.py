@@ -127,8 +127,94 @@ class CogneeEngine:
         except Exception as e:
             logger.error(f"❌ Cognee initialization failed: {e}")
             logger.warning("Cognee features may not work properly")
+    # ====================  PROFESSIONAL PIPELINE INTEGRATION ====================
     
-    # ==================== DOCUMENT INGESTION ====================
+    async def ingest_document_professional(
+        self,
+        document_text: str,
+        document_id: str,
+        document_type: str = "auto_detect",
+        metadata: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """
+        Professional document ingestion using custom pipelines.
+        
+        This method routes documents to specialized extraction pipelines
+        based on document type, providing structured entity extraction
+        and rich knowledge graph building.
+        
+        Args:
+            document_text: Raw document text
+            document_id: Unique document identifier
+            document_type: Type of document or "auto_detect"
+            metadata: Optional metadata (filename, upload_date, etc.)
+            
+        Returns:
+            Dict with ingestion results and extracted entities
+        """
+        try:
+            # Import professional pipelines
+            from app.services.cognee_pipelines import route_to_pipeline
+            
+            logger.info(f"🚀 Professional ingestion: doc_id={document_id}, type={document_type}")
+            
+            # Route to appropriate pipeline
+            result = await route_to_pipeline(
+                text=document_text,
+                document_id=document_id,
+                document_type=document_type
+            )
+            
+            # Format response based on result type
+            if hasattr(result, 'person'):  # Resume object
+                from app.models.cognee_models import Resume
+                resume: Resume = result
+                
+                logger.info(
+                    f"✅ Resume processed: {resume.person.name}, "
+                    f"{len(resume.work_history)} positions, "
+                    f"{len(resume.skills)} skills"
+                )
+                
+                return {
+                    "success": True,
+                    "document_type": "resume",
+                    "entity_count": (
+                        1 +  # Person
+                        len(resume.work_history) +
+                        len(resume.education) +
+                        len(resume.skills)
+                    ),
+                    "entities": {
+                        "person": resume.person.name,
+                        "positions": len(resume.work_history),
+                        "degrees": len(resume.education),
+                        "skills": len(resume.skills)
+                    },
+                    "dataset_name": f"resume_{document_id}"
+                }
+            else:  # Generic document
+                logger.info(f"✅ Document processed: {document_type}")
+                
+                return {
+                    "success": True,
+                    "document_type": document_type,
+                    "dataset_name": f"{document_type}_{document_id}"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Professional ingestion failed: {e}", exc_info=True)
+            
+            # Fallback to basic ingestion
+            logger.warning("⚠️ Falling back to basic Cognee ingestion")
+            return await self.ingest_document(
+                document_text=document_text,
+                document_id=document_id,
+                document_type=document_type,
+                metadata=metadata
+            )
+    
+    # ==================== DOCUMENT INGESTION (ORIGINAL METHOD) ====================
     
     async def ingest_document(
         self,
