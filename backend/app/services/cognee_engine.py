@@ -572,30 +572,52 @@ class CogneeEngine:
     
     async def get_graph_statistics(self) -> Dict[str, Any]:
         """
-        Get knowledge graph statistics from Neo4j
+        Get knowledge graph statistics from Cognee's internal database.
         
         Returns:
             Dict with entity_count, relationship_count, document_count
         """
         try:
-            logger.info("Fetching graph statistics from Neo4j")
+            logger.info("Fetching graph statistics from Cognee internal database")
             
-            # Use Neo4j service for real queries
-            from app.services.neo4j_service import neo4j_service
+            from cognee.infrastructure.databases.graph import get_graph_engine
+            from cognee.infrastructure.databases.graph.models import GraphNode, GraphEdge
+            from sqlalchemy import select, func
             
-            stats = await neo4j_service.get_graph_statistics()
-            
-            logger.info(f"Graph statistics: {stats}")
-            return stats
-            
+            try:
+                graph_engine = await get_graph_engine()
+                
+                async with graph_engine.get_session() as session:
+                    # Count nodes (entities)
+                    node_count_query = select(func.count()).select_from(GraphNode)
+                    node_result = await session.execute(node_count_query)
+                    entity_count = node_result.scalar() or 0
+                    
+                    # Count edges (relationships)
+                    edge_count_query = select(func.count()).select_from(GraphEdge)
+                    edge_result = await session.execute(edge_count_query)
+                    relationship_count = edge_result.scalar() or 0
+                    
+                    # Count unique documents
+                    unique_docs_query = select(func.count(func.distinct(GraphNode.source_node_id))).select_from(GraphNode)
+                    doc_result = await session.execute(unique_docs_query)
+                    document_count = doc_result.scalar() or 0
+                    
+                    logger.info(f"Graph stats: {entity_count} entities, {relationship_count} relationships, {document_count} documents")
+                    
+                    return {
+                        "entity_count": entity_count,
+                        "relationship_count": relationship_count,
+                        "document_count": document_count
+                    }
+                    
+            except Exception as db_error:
+                logger.error(f"Cognee database query failed: {db_error}", exc_info=True)
+                return {"entity_count": 0, "relationship_count": 0, "document_count": 0}
+                
         except Exception as e:
-            logger.error(f"Failed to get graph statistics: {e}")
-            # Return zeros on error
-            return {
-                "entity_count": 0,
-                "relationship_count": 0,
-                "document_count": 0
-            }
+            logger.error(f"Failed to get graph statistics: {e}", exc_info=True)
+            return {"entity_count": 0, "relationship_count": 0, "document_count": 0}
     
     async def get_graph_data(
         self,
@@ -603,7 +625,7 @@ class CogneeEngine:
         document_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Get graph nodes and edges for visualization from Neo4j
+        Get graph nodes and edges from Cognee's internal database for visualization.
         
         Args:
             limit: Maximum number of nodes to return
@@ -613,26 +635,58 @@ class CogneeEngine:
             Dict with 'nodes' and 'edges' lists
         """
         try:
-            logger.info(f"Fetching graph data (limit={limit}, document_id={document_id})")
+            logger.info(f"Fetching graph data from Cognee DB (limit={limit}, document_id={document_id})")
             
-            # Use Neo4j service for real queries
-            from app.services.neo4j_service import neo4j_service
+            from cognee.infrastructure.databases.graph import get_graph_engine
+            from cognee.infrastructure.databases.graph.models import GraphNode, GraphEdge
+            from sqlalchemy import select
             
-            graph_data = await neo4j_service.get_graph_data(
-                limit=limit,
-                document_id=document_id
-            )
-            
-            logger.info(f"Returning {len(graph_data.get('nodes', []))} nodes and {len(graph_data.get('edges', []))} edges")
-            
-            return graph_data
-            
+            try:
+                graph_engine = await get_graph_engine()
+                
+                async with graph_engine.get_session() as session:
+                    # Query nodes
+                    nodes_query = select(GraphNode).limit(limit)
+                    if document_id:
+                        nodes_query = nodes_query.where(GraphNode.source_node_id.contains(document_id))
+                    
+                    nodes_result = await session.execute(nodes_query)
+                    nodes = nodes_result.scalars().all()
+                    
+                    # Query edges
+                    edges_query = select(GraphEdge).limit(limit * 2)
+                    edges_result = await session.execute(edges_query)
+                    edges = edges_result.scalars().all()
+                    
+                    # Transform to visualization format
+                    graph_nodes = []
+                    for node in nodes:
+                        graph_nodes.append({
+                            "id": str(node.id),
+                            "label": getattr(node, 'name', '') or str(node.id)[:8],
+                            "type": getattr(node, 'node_type', 'entity'),
+                            "properties": getattr(node, 'properties', {}) or {}
+                        })
+                    
+                    graph_edges = []
+                    for edge in edges:
+                        graph_edges.append({
+                            "source": str(edge.source_node_id),
+                            "target": str(edge.target_node_id),
+                            "label": getattr(edge, 'relationship_type', 'related_to'),
+                            "properties": getattr(edge, 'properties', {}) or {}
+                        })
+                    
+                    logger.info(f"Retrieved {len(graph_nodes)} nodes, {len(graph_edges)} edges from Cognee DB")
+                    return {"nodes": graph_nodes, "edges": graph_edges}
+                    
+            except Exception as db_error:
+                logger.error(f"Cognee DB query failed: {db_error}", exc_info=True)
+                return {"nodes": [], "edges": []}
+                
         except Exception as e:
-            logger.error(f"Failed to get graph data: {e}")
-            return {
-                "nodes": [],
-                "edges": []
-            }
+            logger.error(f"Failed to get graph data: {e}", exc_info=True)
+            return {"nodes": [], "edges": []}
 
 
 # Singleton instance
