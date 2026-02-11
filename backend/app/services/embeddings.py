@@ -68,5 +68,5 @@ class SentenceTransformerEmbeddingEngine:
         return self._pad_vector(self.model.encode(text, convert_to_numpy=True).tolist())
 
     def get_vector_size(self) -> int:
-        """Return embedding dimension"""
-        return self.dimension
+        """Return embedding dimension (always 3072 for system-wide alignment)"""
+        return 3072

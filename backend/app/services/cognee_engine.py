@@ -337,14 +337,15 @@ class CogneeEngine:
             filename = metadata.get("filename", "unknown") if metadata else "unknown"
             
             try:
-                # Cognee 0.5.2 add() only accepts data and dataset_name
-                # Add aggressive timeout as cognee.add() can hang indefinitely
+                # Cognee 0.5.2 add() linked to user for auditing
+                # Add aggressive timeout
                 await asyncio.wait_for(
                     cognee.add(
                         data=document_text,
-                        dataset_name=dataset_name
+                        dataset_name=dataset_name,
+                        user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
                     ),
-                    timeout=30.0  # 30 second timeout for add operation
+                    timeout=30.0
                 )
                 logger.info(f"✅ Document added to Cognee dataset: {dataset_name}")
             except asyncio.TimeoutError:
@@ -357,9 +358,12 @@ class CogneeEngine:
             # Build knowledge graph with timeout
             logger.info(f"🔨 Building knowledge graph for {dataset_name}...")
             try:
-                # Set a reasonable timeout for graph building (90 seconds - increased from 60)
+                # Set a reasonable timeout for graph building
                 await asyncio.wait_for(
-                    cognee.cognify(datasets=[dataset_name]),
+                    cognee.cognify(
+                        datasets=[dataset_name],
+                        user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                    ),
                     timeout=90.0
                 )
                 logger.info(f"✅ Knowledge graph built successfully for {dataset_name}")
@@ -444,7 +448,8 @@ class CogneeEngine:
             # Use 'query_text' as parameter name (Cognee 0.5.x)
             results = await cognee.search(
                 query_text=query_text, 
-                limit=limit
+                limit=limit,
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
             )
             return results
         except Exception as e:
@@ -464,8 +469,11 @@ class CogneeEngine:
         try:
             # Execute graph search via Cognee
             logger.info(f"Querying Cognee graph: {question}")
-            # Note: Cognee 0.5.2 search() expects query_text=
-            search_results = await cognee.search(query_text=question)
+            # Note: Cognee 0.5.2 search() expects query_text and user
+            search_results = await cognee.search(
+                query_text=question,
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+            )
             
             # Extract entities from search results
             entities = self._extract_entities_from_results(search_results)
