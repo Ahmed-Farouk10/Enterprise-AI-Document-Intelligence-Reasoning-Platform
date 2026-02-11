@@ -101,12 +101,12 @@ IMPORTANT:
             {"role": "user", "content": user}
         ]
         
-        # Increase max_tokens to 3072 (safe limit for many serverless providers)
-        # Previous 2048 was too tight for full resumes + Cognee boilerplate
+        # Increase max_tokens to 4096 (safe limit for many serverless providers)
+        # Previous 3072 was still hitting EOF on very long complex resumes
         return await asyncio.to_thread(
             llm_service.generate, 
             prompt=messages, 
-            max_tokens=3072, 
+            max_tokens=4096, 
             temperature=0.1
         )
 
