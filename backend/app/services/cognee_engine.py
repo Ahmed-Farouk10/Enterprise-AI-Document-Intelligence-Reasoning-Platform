@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 import hashlib
+import uuid
 
 # Cognee imports
 try:
@@ -721,7 +722,7 @@ class CogneeEngine:
                 search_result = await cognee.search(
                     "*", # query_text is Pos 0 
                     SearchType.SUMMARIES, # type is Pos 1?
-                    user=User(id=str(cognee_settings.DEFAULT_USER_ID))
+                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
                 )
                 
                 # Extract stats from search results
@@ -771,7 +772,7 @@ class CogneeEngine:
                 search_result = await cognee.search(
                     "*" if not document_id else f"document:{document_id}",
                     SearchType.SUMMARIES,
-                    user=User(id=str(cognee_settings.DEFAULT_USER_ID))
+                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
                 )
                 
                 graph_nodes = []
