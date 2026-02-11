@@ -50,7 +50,7 @@ class CogneeSettings(BaseSettings):
 
     # LLM & Embedding (Using Qwen + FastEmbed/SentenceTransformers)
     LLM_PROVIDER: str = os.getenv("COGNEE_LLM_PROVIDER", "huggingface")
-    LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-32B-Instruct")
+    LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
     LLM_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
     
     # Standard Embedding Config (Matches Cognee 0.5.x expectations)
@@ -59,7 +59,7 @@ class CogneeSettings(BaseSettings):
     EMBEDDING_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
 
     # Cognee Processing Options
-    EXTRACTION_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-32B-Instruct")
+    EXTRACTION_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
     GRAPH_DATABASE_URL: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 
     class Config:

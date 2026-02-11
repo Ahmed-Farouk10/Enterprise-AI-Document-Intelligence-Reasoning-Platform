@@ -17,7 +17,7 @@ class CustomCogneeLLMEngine:
     """
     def __init__(self):
         self.provider = "custom_local"
-        self.model = "Qwen/Qwen2.5-32B-Instruct"
+        self.model = "Qwen/Qwen2.5-7B-Instruct"
 
     async def acreate_structured_output(
         self, 

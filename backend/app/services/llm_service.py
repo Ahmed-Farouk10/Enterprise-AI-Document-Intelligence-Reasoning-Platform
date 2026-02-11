@@ -52,7 +52,7 @@ class LLMService:
         # TIER 3 UPGRADE: Qwen2.5-32B for production-grade accuracy
         # Previous: microsoft/Phi-3-mini-4k-instruct (hallucination rate ~40%)
         # Qwen2.5-32B: hallucination rate ~15-20%, better document analysis
-        self.model_name = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-32B-Instruct")
+        self.model_name = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
         self.tokenizer: Optional[AutoTokenizer] = None
         self.model: Optional[AutoModelForCausalLM] = None
         self._model_lock = threading.Lock()
