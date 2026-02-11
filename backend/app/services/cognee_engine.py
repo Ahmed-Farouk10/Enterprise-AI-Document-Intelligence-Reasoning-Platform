@@ -20,7 +20,7 @@ except ImportError as e:
     logging.error(f"Failed to import Cognee: {e}")
     logging.warning("Cognee not installed or dependency missing. Run: pip install cognee[neo4j]")
 
-from app.core import settings
+# from app.core import settings  <-- REMOVED: invalid import
 from app.core.logging_config import get_logger
 from app.core.cognee_config import settings as cognee_settings
 

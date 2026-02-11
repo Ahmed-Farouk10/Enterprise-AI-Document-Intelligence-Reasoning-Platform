@@ -37,7 +37,11 @@ class CogneeSettings(BaseSettings):
     COGNEE_GRAPH_URL: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")
+    NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "changeme123")
+
+    # Default User for Cognee operations
+    DEFAULT_USER_ID: str = os.getenv("COGNEE_DEFAULT_USER_ID", "5e5ab0cc-892c-4c79-a8f7-2938f649efcd")
 
     # Vector Store (Qdrant - managed internally by Cognee or external)
     COGNEE_VECTOR_DB_TYPE: str = "qdrant"
