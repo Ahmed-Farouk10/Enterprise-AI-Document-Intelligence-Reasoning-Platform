@@ -91,6 +91,9 @@ def configure_cognee_paths():
     os.environ["EMBEDDING_DIMENSION"] = "384"
     os.environ["VECTOR_DB_DIMENSION"] = "384"
     os.environ["COGNEE_VECTOR_DIMENSION"] = "384"
+    os.environ["COGNEE_DIMENSION"] = "384" # Possible alias
+    os.environ["EMBEDDING_SIZE"] = "384"
+    os.environ["VECTOR_SIZE"] = "384"
     
     print(f"📦 Model cache directory: {models_dir}")
     
