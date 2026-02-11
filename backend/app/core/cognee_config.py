@@ -43,16 +43,19 @@ class CogneeSettings(BaseSettings):
     # Default User for Cognee operations
     DEFAULT_USER_ID: str = os.getenv("COGNEE_DEFAULT_USER_ID", "5e5ab0cc-892c-4c79-a8f7-2938f649efcd")
 
-    # Vector Store (Qdrant - managed internally by Cognee or external)
-    COGNEE_VECTOR_DB_TYPE: str = "qdrant"
-    COGNEE_VECTOR_DB_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
-    COGNEE_VECTOR_DB_KEY: Optional[str] = os.getenv("QDRANT_API_KEY")
+    # Vector Store (Local LanceDB for spaces)
+    COGNEE_VECTOR_DB_TYPE: str = "lancedb"
+    COGNEE_VECTOR_DB_URL: str = os.getenv("LANCEDB_URI", "/app/cognee_data/lancedb")
+    # COGNEE_VECTOR_DB_KEY: Not needed for LanceDB
 
-    # LLM & Embedding (Using Qwen via Hugging Face)
-    # Cognee uses these to extract entities and relations
+    # LLM & Embedding (Using Qwen + FastEmbed/SentenceTransformers)
     LLM_PROVIDER: str = os.getenv("COGNEE_LLM_PROVIDER", "huggingface")
     LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-32B-Instruct")
-    LLM_API_KEY: Optional[str] = os.getenv("HF_TOKEN")  # Optional for HF
+    LLM_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
+    
+    # Standard Embedding Config (Matches Cognee 0.5.x expectations)
+    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "fastembed")
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
     EMBEDDING_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
 
     # Cognee Processing Options
@@ -74,11 +77,14 @@ os.environ["COGNEE_GRAPH_URL"] = settings.COGNEE_GRAPH_URL
 os.environ["COGNEE_VECTOR_DB_TYPE"] = settings.COGNEE_VECTOR_DB_TYPE
 os.environ["COGNEE_VECTOR_DB_URL"] = settings.COGNEE_VECTOR_DB_URL
 
+# CRITICAL: Set standard variables for Cognee 0.5.x
+os.environ["EMBEDDING_PROVIDER"] = settings.EMBEDDING_PROVIDER
+os.environ["EMBEDDING_MODEL"] = settings.EMBEDDING_MODEL
+os.environ["COGNEE_EMBEDDING_PROVIDER"] = settings.EMBEDDING_PROVIDER # Alias for safety
+
 # Update LLM_API_KEY if explicitly provided in settings
 if settings.LLM_API_KEY and settings.LLM_API_KEY != "local":
     os.environ["LLM_API_KEY"] = settings.LLM_API_KEY
-if settings.EMBEDDING_API_KEY:
-    os.environ["EMBEDDING_API_KEY"] = settings.EMBEDDING_API_KEY
 
 # Set Cognee root directory for data storage
 COGNEE_ROOT_DIR = os.getenv("COGNEE_ROOT_DIR", "/app/cognee_data")
