@@ -162,6 +162,24 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         with self._model_lock:
             if self.model is not None:
                 return
+            
+            # Check if running on HuggingFace Spaces (limited resources)
+            is_hf_spaces = os.getenv("SPACE_ID") or os.getenv("HF_HOME", "").startswith("/app/.cache")
+            
+            if is_hf_spaces:
+                logger.warning(f"🌐 Running on HuggingFace Spaces - Skipping local model load for {self.model_name}")
+                logger.warning("💡 Will use HuggingFace Inference API for completions")
+                # Only load tokenizer for text processing
+                try:
+                    self.tokenizer = AutoTokenizer.from_pretrained(
+                        self.model_name,
+                        trust_remote_code=True
+                    )
+                    logger.info("✅ Tokenizer loaded successfully")
+                except Exception as e:
+                    logger.error(f"Tokenizer loading failed: {e}")
+                    # Even tokenizer can fail on HF spaces, that's OK
+                return
                 
             logger.info(f"Loading LLM: {self.model_name}")
             try:
@@ -196,6 +214,39 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         """Eager loading for production deployment"""
         self._ensure_loaded()
         logger.info("LLM Service warmed up and ready")
+    
+    def _generate_via_inference_api(
+        self,
+        prompt: str,
+        max_tokens: int = 1024,
+        temperature: float = 0.3,
+        top_p: float = 0.9
+    ) -> str:
+        """
+        Generate using HuggingFace Inference API (for HF Spaces deployment).
+        Fallback when model can't be loaded locally due to memory constraints.
+        """
+        try:
+            from huggingface_hub import InferenceClient
+            
+            client = InferenceClient(token=os.getenv("HF_TOKEN"))
+            
+            # Use the same model via Inference API
+            response = client.text_generation(
+                prompt,
+                model=self.model_name,
+                max_new_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                return_full_text=False
+            )
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"HF Inference API failed: {e}")
+            # Graceful degradation
+            return "I apologize, but I'm currently unable to process this request due to system limitations. Please try again later."
 
     # ==================== INTENT & SCOPE CLASSIFICATION ====================
     
@@ -415,27 +466,41 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
 
     def generate(
         self,
-        system_prompt: str,
-        document_context: str,
-        question: str,
-        max_new_tokens: int = 1024,
-        temperature: float = 0.2
+        prompt: str,
+        max_tokens: int = 1024,
+        temperature: float = 0.3,  # Lower = more deterministic
+        top_p: float = 0.9
     ) -> str:
         """
-        Synchronous generation with full safety controls.
-        Use for: ATS scoring, gap analysis, short answers.
+        Generate completion using local model OR HuggingFace Inference API.
+        
+        Args:
+            prompt: The prompt to complete
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature (0.0-1.0)
+            top_p: Nucleus sampling parameter
+            
+        Returns:
+            Generated text
         """
+        from app.core.logging_config import get_logger
+        logger = get_logger(__name__)
+
         self._ensure_loaded()
         
-        messages = self._prepare_messages(system_prompt, document_context, question)
+        # If model not loaded (HF Spaces), use Inference API
+        if self.model is None:
+            logger.info("Using HuggingFace Inference API for generation")
+            return self._generate_via_inference_api(prompt, max_tokens, temperature, top_p)
         
-        # Apply chat template
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
+        # Local generation
+        logger.debug(f"Generating with temperature={temperature}, max_tokens={max_tokens}")
         
+        # Apply chat template (assuming 'prompt' is already formatted as a single string for the model)
+        # If 'prompt' is expected to be a list of messages, this part needs adjustment.
+        # Based on the instruction, 'prompt' is a string, so we'll treat it as the direct input text.
+        text = prompt # The prompt is already the full text to be sent to the model
+
         inputs = self.tokenizer(
             text,
             return_tensors="pt",
