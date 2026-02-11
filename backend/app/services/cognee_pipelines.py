@@ -273,7 +273,7 @@ async def process_resume_document(
     text: str,
     document_id: str,
     document_type: str = "resume",
-    timeout_seconds: int = 30
+    timeout_seconds: int = 120
 ) -> Resume:
     """
     Professional resume processing pipeline using Cognee best practices.
