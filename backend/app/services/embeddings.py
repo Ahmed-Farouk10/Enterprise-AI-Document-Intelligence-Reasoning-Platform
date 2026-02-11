@@ -38,7 +38,13 @@ class SentenceTransformerEmbeddingEngine:
                 text, 
                 convert_to_numpy=True
             )
-            return embedding.tolist()
+            
+            # CRITICAL: Pad to 3072 dimensions for Cognee LanceDB compatibility
+            # Cognee 0.5.2 internal Pydantic validators often hardcode 3072 (OpenAI default)
+            vector = embedding.tolist()
+            if len(vector) < 3072:
+                vector.extend([0.0] * (3072 - len(vector)))
+            return vector
         except Exception as e:
             logger.error(f"Embedding failed for text preview '{text[:20]}...': {e}")
             return [0.0] * self.dimension

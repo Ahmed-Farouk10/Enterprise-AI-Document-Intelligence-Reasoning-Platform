@@ -24,23 +24,19 @@ except ImportError:
 # ==================== CORE ENTITIES ====================
 
 class Skill(DataPoint):
-    """
-    Represents a professional skill or competency.
-    
-    Examples: Python, Project Management, Financial Analysis
-    """
-    name: str = Field(description="Skill name (e.g., 'Python', 'Leadership')")
+    """Skill"""
+    name: str = Field(description="Skill name")
     level: Optional[str] = Field(
         default=None,
-        description="Proficiency level: beginner, intermediate, expert, or advanced"
+        description="Level"
     )
     years_experience: Optional[int] = Field(
         default=None,
-        description="Years of experience with this skill"
+        description="Years"
     )
     category: Optional[str] = Field(
         default=None,
-        description="Skill category: technical, soft, language, certification"
+        description="Category"
     )
     
     # Make skills searchable by name and category
@@ -140,14 +136,14 @@ class WorkExperience(DataPoint):
         description="Calculated duration in months"
     )
     
-    location: Optional[str] = Field(default=None, description="Job location")
+    location: Optional[str] = Field(default=None, description="Location")
     responsibilities: List[str] = Field(
         default_factory=list,
-        description="List of key responsibilities or achievements"
+        description="Responsibilities"
     )
     skills_used: List[str] = Field(
         default_factory=list,
-        description="Skills applied in this role"
+        description="Skills"
     )
 
     @model_validator(mode = "before")
