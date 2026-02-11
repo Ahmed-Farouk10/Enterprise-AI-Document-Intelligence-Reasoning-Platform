@@ -103,8 +103,8 @@ class CogneeEngine:
         if not COGNEE_AVAILABLE:
             raise RuntimeError("Cognee library required. Install: pip install cognee")
         
-        self.extraction_model = settings.EXTRACTION_MODEL
-        self.graph_db_url = settings.GRAPH_DATABASE_URL
+        self.extraction_model = cognee_cognee_settings.EXTRACTION_MODEL
+        self.graph_db_url = cognee_cognee_settings.GRAPH_DATABASE_URL
         
         # Analysis configurations per domain
         self.domain_configs = {
@@ -612,7 +612,7 @@ class CogneeEngine:
                 search_result = await cognee.search(
                     SearchType.SUMMARIES,  # Get document summaries
                     query_text="*",  # Query all
-                    user=User(id=str(cognee_settings.DEFAULT_USER_ID))
+                    user=User(id=str(cognee_cognee_settings.DEFAULT_USER_ID))
                 )
                 
                 # Extract stats from search results
@@ -662,7 +662,7 @@ class CogneeEngine:
                 search_result = await cognee.search(
                     SearchType.SUMMARIES,  # Get document summaries/nodes
                     query_text="*" if not document_id else f"document:{document_id}",
-                    user=User(id=str(cognee_settings.DEFAULT_USER_ID))
+                    user=User(id=str(cognee_cognee_settings.DEFAULT_USER_ID))
                 )
                 
                 graph_nodes = []
