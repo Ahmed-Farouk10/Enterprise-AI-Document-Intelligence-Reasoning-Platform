@@ -612,7 +612,7 @@ class CogneeEngine:
                 search_result = await cognee.search(
                     SearchType.SUMMARIES,  # Get document summaries
                     query_text="*",  # Query all
-                    user=User(id=str(settings.DEFAULT_USER_ID))
+                    user=User(id=str(cognee_settings.DEFAULT_USER_ID))
                 )
                 
                 # Extract stats from search results
@@ -662,7 +662,7 @@ class CogneeEngine:
                 search_result = await cognee.search(
                     SearchType.SUMMARIES,  # Get document summaries/nodes
                     query_text="*" if not document_id else f"document:{document_id}",
-                    user=User(id=str(settings.DEFAULT_USER_ID))
+                    user=User(id=str(cognee_settings.DEFAULT_USER_ID))
                 )
                 
                 graph_nodes = []
