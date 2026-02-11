@@ -60,6 +60,11 @@ OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
             # Clean up markdown code blocks if present
             cleaned_json = self._clean_json(response_text)
             
+            # Robust JSON Check (Option 3 Fix)
+            if not cleaned_json.strip().startswith(('{', '[')):
+                logger.error(f"❌ LLM returned non-JSON response: {cleaned_json[:200]}...")
+                raise ValueError(f"LLM API error (Non-JSON response): {cleaned_json[:100]}")
+                
             logger.debug(f"🔍 Extracted JSON: {cleaned_json[:200]}...")
             
             # Validate with Pydantic
