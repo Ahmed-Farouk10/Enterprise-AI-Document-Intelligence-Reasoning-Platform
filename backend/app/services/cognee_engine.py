@@ -440,9 +440,9 @@ class CogneeEngine:
         Requested Fix: Problem 5
         """
         try:
-            # Use 'query' not 'query_text' as parameter name
+            # Use 'query_text' as parameter name (Cognee 0.5.x)
             results = await cognee.search(
-                query=query_text,  # Correct parameter name
+                query_text=query_text, 
                 limit=limit
             )
             return results
@@ -463,8 +463,8 @@ class CogneeEngine:
         try:
             # Execute graph search via Cognee
             logger.info(f"Querying Cognee graph: {question}")
-            # Note: Cognee 0.5.2 search() expects query=, not query_text=
-            search_results = await cognee.search(query=question)
+            # Note: Cognee 0.5.2 search() expects query_text=
+            search_results = await cognee.search(query_text=question)
             
             # Extract entities from search results
             entities = self._extract_entities_from_results(search_results)
@@ -720,7 +720,7 @@ class CogneeEngine:
                 # SearchType options: SUMMARIES, CHUNKS, NODES
                 search_result = await cognee.search(
                     SearchType.SUMMARIES,  # Get document summaries
-                    query="*",  # Correct parameter name
+                    query_text="*", 
                     user=User(id=str(cognee_settings.DEFAULT_USER_ID))
                 )
                 
@@ -770,7 +770,7 @@ class CogneeEngine:
             try:
                 search_result = await cognee.search(
                     SearchType.SUMMARIES,  # Get document summaries/nodes
-                    query="*" if not document_id else f"document:{document_id}",
+                    query_text="*" if not document_id else f"document:{document_id}",
                     user=User(id=str(cognee_settings.DEFAULT_USER_ID))
                 )
                 

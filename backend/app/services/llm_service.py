@@ -249,7 +249,16 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             return response.choices[0].message.content
             
         except Exception as e:
-            logger.error(f"HF Inference API failed: {e}")
+            error_msg = str(e)
+            logger.error(f"HF Inference API failed: {error_msg}")
+            
+            if "403 Forbidden" in error_msg and "Inference Providers" in error_msg:
+                advice = (
+                    "\n\n🔑 TIP: Your Hugging Face fine-grained token needs 'Make calls to Inference Providers' permission enabled. "
+                    "Alternatively, enable 'Make calls to the serverless Inference API'."
+                )
+                return f"I apologize, but I'm unable to authenticate with the Inference API. {advice}"
+                
             # Graceful degradation
             return "I apologize, but I'm currently unable to process this request due to system limitations. Please try again later."
 

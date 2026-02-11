@@ -140,7 +140,7 @@ class WorkExperience(DataPoint):
     )
     
     metadata: Dict[str, Any] = Field(
-        default={"index_fields": ["title", "organization", "skills_used"]},
+        default={"index_fields": ["title", "organization"]},
         description="Metadata for vector indexing"
     )
 
@@ -226,7 +226,7 @@ class Resume(DataPoint):
     )
     
     metadata: Dict[str, Any] = Field(
-        default={"index_fields": ["summary", "certifications", "languages"]},
+        default={"index_fields": ["summary"]},
         description="Metadata for vector indexing"
     )
 
