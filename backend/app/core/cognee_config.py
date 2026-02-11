@@ -21,6 +21,14 @@ os.makedirs(_cognee_root, exist_ok=True)
 
 # Set env vars for Cognee to pick up
 os.environ["COGNEE_ROOT_DIR"] = _cognee_root
+
+# CRITICAL FIX: Skip LLM connection test on HF Spaces
+# Cognee's setup_and_check_environment() calls test_llm_connection() which hangs for 30+ seconds
+# when LLM_API_KEY is invalid. This causes pipeline timeout.
+if os.getenv("HF_HOME") or not os.getenv("HF_TOKEN"):
+    os.environ["COGNEE_SKIP_LLM_TEST"] = "true"
+    logger_msg = "⚙️ Cognee: Skipping LLM connection test (HF Spaces / no valid token)"
+    print(logger_msg)
 # ---------------------------------------------------------
 
 class CogneeSettings(BaseSettings):

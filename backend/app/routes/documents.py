@@ -121,13 +121,14 @@ async def upload_document(request: Request, response: Response, file: UploadFile
                     )
                     
                     # Update document with extracted entity stats
-                    if document_graph["success"]:
+                    # GraphIngestionResult is an object, not a dict
+                    if hasattr(document_graph, 'success') and document_graph.success:
                         document.extra_data = {
                             "graph_stats": {
-                                "entity_count": document_graph.get("entity_count", 0),
-                                "document_type": document_graph.get("document_type", "unknown"),
-                                "dataset_name": document_graph.get("dataset_name", ""),
-                                "entities": document_graph.get("entities", {})
+                                "entity_count": getattr(document_graph, "entity_count", 0),
+                                "document_type": getattr(document_graph, "document_type", "unknown"),
+                                "dataset_name": getattr(document_graph, "dataset_name", ""),
+                                "entities": getattr(document_graph, "entities", {})
                             }
                         }
                         

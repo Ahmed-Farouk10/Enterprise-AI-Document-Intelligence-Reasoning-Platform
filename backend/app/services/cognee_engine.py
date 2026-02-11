@@ -11,11 +11,12 @@ import hashlib
 # Cognee imports
 try:
     import cognee
-    # SearchType and User models might vary by version, using current best practices
-    # In cognee 0.5.2, search is accessible via cognee.search
+    # SearchType for entity/relationship queries
+    from cognee.api.v1.search import SearchType
     COGNEE_AVAILABLE = True
 except ImportError as e:
     COGNEE_AVAILABLE = False
+    SearchType = None  # Fallback
     logging.error(f"Failed to import Cognee: {e}")
     logging.warning("Cognee not installed or dependency missing. Run: pip install cognee[neo4j]")
 
