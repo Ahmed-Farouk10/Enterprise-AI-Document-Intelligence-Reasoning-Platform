@@ -324,20 +324,28 @@ async def process_resume_document(
         
         # Run pipeline with timeout
         final_result = None
-        
+    
         try:
-            async for result in asyncio.wait_for(
-                run_pipeline(
-                    tasks=tasks,
-                    data=text,
-                    datasets=[dataset_name]
-                ),
-                timeout=timeout_seconds
-            ):
-                final_result = result
-                logger.info(f"⏳ Pipeline step completed, result type: {type(result).__name__}")
+            # Run pipeline with timeout - run_pipeline is an async generator
+            pipeline_gen = run_pipeline(
+                tasks=tasks,
+                data=text,
+                datasets=[dataset_name] # Changed from dataset_name to datasets=[dataset_name] to match original
+            )
+            
+            # Iterate through pipeline steps with overall timeout
+            async def consume_pipeline():
+                result = None
+                async for step_result in pipeline_gen:
+                    result = step_result
+                    logger.info(f"⏳ Pipeline step completed")
+                return result
+            
+            final_result = await asyncio.wait_for(consume_pipeline(), timeout=timeout_seconds)
+            logger.info(f"✅ Resume pipeline completed for doc {document_id}")
+            
         except asyncio.TimeoutError:
-            logger.error(f"⏱️ Pipeline timeout after {timeout_seconds}s - this is expected for large documents")
+            logger.warning(f"⏰ Resume pipeline timeout after {timeout_seconds}s for doc {document_id}")
             raise RuntimeError(f"Resume extraction timed out after {timeout_seconds}s")
         
         if final_result is None:
