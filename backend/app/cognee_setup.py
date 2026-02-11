@@ -64,6 +64,21 @@ def configure_cognee_paths():
     os.environ["COGNEE_DB_PATH"] = os.path.join(cognee_root, "databases")
     os.environ["COGNEE_DATA_DIR"] = os.path.join(cognee_root, "data")
     
+    # CRITICAL FIX: Configure embedding models to prevent downloads during runtime
+    # Force Cognee to use small, fast local models instead of downloading large ones
+    models_dir = os.path.join(cognee_root, "models")
+    os.makedirs(models_dir, mode=0o777, exist_ok=True)
+    
+    os.environ["SENTENCE_TRANSFORMERS_HOME"] = models_dir
+    os.environ["TRANSFORMERS_CACHE"] = models_dir
+    os.environ["HF_HOME"] = models_dir
+    
+    # Use small, fast embedding model (22MB instead of 500MB+)
+    os.environ["COGNEE_EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"
+    os.environ["COGNEE_VECTOR_DB"] = "lancedb"  # Use local vector DB
+    
+    print(f"📦 Model cache directory: {models_dir}")
+    
     # Database configuration - use SQLite for Cognee's internal database
     # This is separate from the application's PostgreSQL database
     db_path = os.path.join(cognee_root, "databases", "cognee_db.db")
