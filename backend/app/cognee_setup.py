@@ -82,10 +82,15 @@ def configure_cognee_paths():
     os.environ["COGNEE_EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"
     os.environ["COGNEE_EMBEDDING_PROVIDER"] = "fastembed"
 
-    # Local Vector DB
     os.environ["VECTOR_DB_PROVIDER"] = "lancedb" # Standard variable
     os.environ["COGNEE_VECTOR_DB_TYPE"] = "lancedb" # Internal config override
     os.environ["COGNEE_VECTOR_DB"] = "lancedb"
+    
+    # CRITICAL: Force 384 dimensions for local all-MiniLM-L6-v2
+    # This prevents Cognee from defaulting to 3072 (OpenAI) and crashing on storage
+    os.environ["EMBEDDING_DIMENSION"] = "384"
+    os.environ["VECTOR_DB_DIMENSION"] = "384"
+    os.environ["COGNEE_VECTOR_DIMENSION"] = "384"
     
     print(f"📦 Model cache directory: {models_dir}")
     

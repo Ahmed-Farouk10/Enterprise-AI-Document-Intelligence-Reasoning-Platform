@@ -719,7 +719,7 @@ class CogneeEngine:
                 # Use cognee's search API to estimate graph size
                 # SearchType options: SUMMARIES, CHUNKS, NODES
                 search_result = await cognee.search(
-                    SearchType.SUMMARIES,  # Get document summaries
+                    search_type=SearchType.SUMMARIES,  # Explicitly named
                     query_text="*", 
                     user=User(id=str(cognee_settings.DEFAULT_USER_ID))
                 )
@@ -769,7 +769,7 @@ class CogneeEngine:
             # Try using cognee's search API to get graph entities
             try:
                 search_result = await cognee.search(
-                    SearchType.SUMMARIES,  # Get document summaries/nodes
+                    search_type=SearchType.SUMMARIES,  # Explicitly named
                     query_text="*" if not document_id else f"document:{document_id}",
                     user=User(id=str(cognee_settings.DEFAULT_USER_ID))
                 )
