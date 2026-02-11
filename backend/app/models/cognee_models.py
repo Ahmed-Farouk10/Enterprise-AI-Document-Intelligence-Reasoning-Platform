@@ -84,30 +84,22 @@ class Organization(DataPoint):
 
 
 class Person(DataPoint):
-    """
-    Individual person with professional profile.
+    """Person"""
+    name: str = Field(description="Name")
+    title: Optional[str] = Field(default=None, description="Title")
+    email: Optional[str] = Field(default=None, description="Email")
+    phone: Optional[str] = Field(default=None, description="Phone")
+    location: Optional[str] = Field(default=None, description="Location")
+    linkedin: Optional[str] = Field(default=None, description="LinkedIn")
     
-    Represents the main subject of a resume or profile document.
-    """
-    name: str = Field(description="Full name")
-    title: Optional[str] = Field(
-        default=None,
-        description="Current professional title (e.g., 'Senior Software Engineer')"
-    )
-    email: Optional[str] = Field(default=None, description="Email address")
-    phone: Optional[str] = Field(default=None, description="Phone number")
-    location: Optional[str] = Field(default=None, description="Current location/city")
-    linkedin: Optional[str] = Field(default=None, description="LinkedIn profile URL")
-    
-    # Relationships (populated by LLM extraction)
     skills: List[Skill] = Field(
         default_factory=list,
-        description="Skills possessed by this person"
+        description="Skills"
     )
     
     metadata: Dict[str, Any] = Field(
         default={"index_fields": ["name", "title", "location"]},
-        description="Metadata for vector indexing"
+        description="Vector metadata"
     )
 
 
@@ -163,31 +155,18 @@ class WorkExperience(DataPoint):
 
 
 class Education(DataPoint):
-    """
-    Educational credential or degree.
-    
-    Represents academic achievement from an institution.
-    """
-    person_name: str = Field(description="Person who earned this degree")
-    institution: str = Field(description="University or educational institution")
-    degree: str = Field(description="Degree type (e.g., 'Bachelor of Science')")
-    field_of_study: Optional[str] = Field(
-        default=None,
-        description="Major/field of study (e.g., 'Computer Science')"
-    )
-    graduation_date: Optional[str] = Field(
-        default=None,
-        description="Graduation date (YYYY or YYYY-MM)"
-    )
-    gpa: Optional[float] = Field(default=None, description="Grade point average")
-    honors: Optional[str] = Field(
-        default=None,
-        description="Academic honors (e.g., 'Summa Cum Laude')"
-    )
+    """Education"""
+    person_name: str = Field(description="Name")
+    institution: str = Field(description="Institution")
+    degree: str = Field(description="Degree")
+    field_of_study: Optional[str] = Field(default=None, description="Field")
+    graduation_date: Optional[str] = Field(default=None, description="Graduation")
+    gpa: Optional[float] = Field(default=None, description="GPA")
+    honors: Optional[str] = Field(default=None, description="Honors")
     
     metadata: Dict[str, Any] = Field(
         default={"index_fields": ["degree", "field_of_study", "institution"]},
-        description="Metadata for vector indexing"
+        description="Vector metadata"
     )
 
 
