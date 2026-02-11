@@ -115,25 +115,38 @@ class CogneeEngine:
         self.extraction_model = cognee_settings.EXTRACTION_MODEL
         self.graph_db_url = cognee_settings.GRAPH_DATABASE_URL
         
-        # Force Robust Local Embeddings (SentenceTransformers via wrapper)
+        # Force Robust Local Configuration (Embeddings + LLM)
         try:
-            # 1. Custom Wrapper using SentenceTransformers
-            # This is safer than FastEmbed because we control the implementation
+            # 1. Embeddings (SentenceTransformer)
             from app.services.embeddings import SentenceTransformerEmbeddingEngine
-            
-            # Using 'all-MiniLM-L6-v2' (small, fast, CPU friendly)
             logger.info("Initializing custom SentenceTransformerEmbeddingEngine...")
-            local_engine = SentenceTransformerEmbeddingEngine()
-            
-            # Force configuration
-            cognee.config.embedding_engine = local_engine
-            logger.info(f"✅ Forced Custom SentenceTransformer embedding engine (dim={local_engine.get_vector_size()})")
+            local_embed_engine = SentenceTransformerEmbeddingEngine()
+            cognee.config.embedding_engine = local_embed_engine
+            logger.info(f"✅ Forced Custom Embedding Engine (dim={local_embed_engine.get_vector_size()})")
+
+            # 2. LLM (Custom Qwen Wrapper)
+            # This bypasses LLMGateway's default OpenAI behavior for structured output
+            try:
+                from app.services.custom_cognee_llm import CustomCogneeLLMEngine
+                logger.info("Initializing custom Cognee LLM Engine (Local Qwen)...")
+                local_llm_engine = CustomCogneeLLMEngine()
+                
+                # Inject into Cognee config
+                # Cognee 0.5.x uses 'llm_engine' or 'llm_client' depending on version
+                # We set both to be safe
+                cognee.config.llm_engine = local_llm_engine
+                cognee.config.llm_client = local_llm_engine
+                
+                logger.info("✅ Forced Custom LLM Engine (Local Qwen for Structured Output)")
+            except Exception as e_llm:
+                logger.error(f"❌ Failed to inject Custom LLM: {e_llm}")
+                # Fallback to config-based (which might default to OpenAI, sadly)
             
         except Exception as e:
-            logger.error(f"❌ Failed to initialize SentenceTransformers: {e}")
-            logger.info("Attempting fallback to FastEmbed...")
+            logger.error(f"❌ Failed to initialize custom engines: {e}")
+            logger.info("Attempting fallback to FastEmbed for embeddings...")
             
-            # 2. Fallback to FastEmbed (original logic)
+            # Fallback to FastEmbed (original logic)
             try:
                 import fastembed
                 engine_cls = None
@@ -156,15 +169,9 @@ class CogneeEngine:
                     cognee.config.embedding_engine = engine_cls()
                     logger.info("✅ Fallback: Forced FastEmbed embedding engine")
                 else:
-                    # Last resort string
                     if hasattr(cognee.config, "embedding_engine"):
                         cognee.config.embedding_engine = "fastembed"
                         logger.info("⚠️ Fallback: Set embedding_engine='fastembed'")
-                    else:
-                        logger.warning("❌ Failed to find FastEmbed engine class")
-                        
-            except ImportError:
-                logger.warning("⚠️ fastembed not installed")
             except Exception as fe:
                 logger.error(f"❌ FastEmbed fallback also failed: {fe}")
         
