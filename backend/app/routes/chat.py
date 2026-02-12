@@ -18,6 +18,9 @@ from app.services.knowledge_graph import kg_service
 from app.services.cognee_engine import cognee_engine, AnalysisMode, GraphQueryResult
 from app.services.verification_service import get_verification_service
 import json
+from app.core.session_manager import session_manager
+from app.core.conversational_memory import conversational_memory
+from app.core.query_cache import query_cache
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -332,6 +335,33 @@ async def stream_message(
         )
     )
 
+    # --- SESSION MANAGER INTEGRATION ---
+    from app.core.session_manager import session_manager
+    
+    # Get/Create Session Context
+    # We use the session_id from the URL as the consistent ID
+    sm_session = session_manager.get_or_create_session(user_id="default_user", session_id=session_id)
+    history = sm_session.get("context", [])
+    
+    # Save user message to context manager
+    session_manager.update_session_context(
+        session_id=session_id,
+        message={"role": "user", "content": message_data.content},
+        document_ids=session.document_ids
+    )
+
+    # --- SESSION MANAGER INTEGRATION ---
+    # Get/Create Session Context
+    sm_session = session_manager.get_or_create_session(user_id="default_user", session_id=session_id)
+    history = sm_session.get("context", [])
+    
+    # Save user message to context manager
+    session_manager.update_session_context(
+        session_id=session_id,
+        message={"role": "user", "content": message_data.content},
+        document_ids=session.document_ids
+    )
+
     config = AnalysisConfig(
         intent=intent,
         depth=depth,
@@ -342,11 +372,43 @@ async def stream_message(
     scoped_context = llm.extract_scope_context(document_text, scope)
     system_prompt = llm.build_system_prompt(config)
     
+    # Inject History into System Prompt
+    if history:
+        history_text = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in history[-5:]])
+        system_prompt += f"\n\nCONVERSATION HISTORY:\n{history_text}\n"
+
     async def event_generator():
         full_response = ""
         document_context = {"scope": scope, "intent": intent}
         
         try:
+            # 0. SEMANTIC CACHE CHECK
+            # We check cache immediately to save compute
+            cached_result = await query_cache.get_semantic(message_data.content)
+            if cached_result:
+                yield _sse_event("status", "⚡ Semantic Cache Hit (Efficiency: 100%)")
+                yield _sse_event("reasoning", f"Found similar query (Similarity: {cached_result.get('similarity', 0):.2f})")
+                
+                # Stream cached content as if it were being generated (fast replay)
+                cached_content = cached_result['response']
+                chunk_size = 10
+                for i in range(0, len(cached_content), chunk_size):
+                    yield _sse_event("token", cached_content[i:i+chunk_size])
+                    await asyncio.sleep(0.01) # fast stream simulation
+                
+                yield _sse_event("done", cached_content, {"source": "semantic_cache"})
+                return
+
+            # 1. RETRIEVE MEMORIES & HISTORY
+            # Get consistent history from Redis
+            history_list = await session_manager.get_conversation_history(session_id, limit=6)
+            
+            # Get relevant long-term memories
+            relevant_memories = await conversational_memory.retrieve_relevant_memories(
+                user_id=sm_session.user_id,
+                query=message_data.content
+            )
+            
             # Phase 1: Show ACTUAL retrieval method used
             retrieval_method = retrieval_data.get("retrieval_method", "unknown")
             
@@ -365,6 +427,10 @@ async def stream_message(
             if retrieval_data.get("entities"):
                 entities = [e["name"] for e in retrieval_data["entities"]]
                 yield _sse_event("reasoning", f"✓ Found {len(entities)} relevant entities: {', '.join(entities[:3])}...")
+            
+            # Show memory usage if relevant
+            if relevant_memories:
+                 yield _sse_event("reasoning", f"🧠 Recalled {len(relevant_memories)} relevant facts from memory.")
 
             # Phase 2: Synthesis
             if retrieval_method == "cognee" or retrieval_method == "hybrid":
@@ -417,10 +483,32 @@ async def stream_message(
                 "hallucinated_count": len(verification_report['hallucinated_facts'])
             }
             
+            # --- MEMORY & CACHE UPDATES ---
+            # 1. Update Session Context (Redis)
+            await session_manager.add_message(
+                session_id=session_id,
+                role="assistant",
+                content=final_response
+            )
+            
+            # 2. Update Semantic Cache (for future queries)
+            await query_cache.set_semantic(
+                query=message_data.content,
+                response=final_response
+            )
+            
+            # 3. Update Working Memory (Short-term context)
+            current_context = history_list + [{"role": "user", "content": message_data.content}, {"role": "assistant", "content": final_response}]
+            await conversational_memory.update_working_memory(
+                session_id=session_id,
+                user_id=sm_session.user_id,
+                context_items=current_context
+            )
+
             # Completion
             yield _sse_event("done", final_response, document_context)
             
-            # Background save with NEW session (thread-safe)
+            # Background save (SQL) - Legacy but kept for analytics
             def _save_background():
                 db_session = SessionLocal()
                 try:
@@ -435,7 +523,8 @@ async def stream_message(
             )
             
         except Exception as e:
-            logger.error("stream_error", error=str(e))
+            # Structlog requires keyword arguments for context
+            logger.error("stream_error", error=str(e), session_id=session_id)
             yield _sse_event("error", str(e))
     
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -444,138 +533,43 @@ async def stream_message(
 # ==================== UTILITY FUNCTIONS ====================
 
 async def _get_retrieved_context(query: str, depth: str, document_ids: List[str] = []) -> Dict[str, Any]:
-    """Retrieve context using Cognee graph (PRIMARY) with vector store fallback."""
+    """
+    Retrieve context using the new HybridSearchService (Vector + Graph Fusion).
+    """
+    from app.services.hybrid_search_service import hybrid_search_service, SearchConfig
     
-    # ========== PRIMARY: COGNEE GRAPH SEARCH ==========
-    cognee_context = ""
-    entities = []
-    confidence = 0.0
-    graph_evidence = []
-    retrieval_method = "none"
+    # Configure search based on depth/intent
+    config = SearchConfig()
     
-    # Try Cognee if documents are available
-    if document_ids:
-        try:
-            logger.info(f"🧠 Cognee graph retrieval (primary) for docs: {document_ids}")
-            
-            # Map depth to analysis mode
-            mode = AnalysisMode.SUMMARIZATION
-            if depth == LLMService.DEPTH_EVALUATIVE:
-                mode = AnalysisMode.ENTITY_EXTRACTION
-            elif depth == LLMService.DEPTH_IMPROVEMENT:
-                mode = AnalysisMode.RELATIONSHIP_MAPPING
-            
-            # Query Cognee knowledge graph with stricter timeout
-            # We use a shorter timeout here to fallback quickly if graph is slow
-            try:
-                result = await asyncio.wait_for(
-                    cognee_engine.query(
-                        question=query,
-                        document_ids=document_ids,
-                        mode=mode,
-                        include_subgraph=False
-                    ),
-                    timeout=15.0  # 15s timeout for graph query
-                )
-                
-                if result.answer and len(result.answer.strip()) > 20 and result.confidence_score > 0.1:
-                    cognee_context = result.answer
-                    entities = result.entities_involved
-                    confidence = result.confidence_score
-                    graph_evidence = result.evidence_paths
-                    retrieval_method = "cognee_graph"
-                    
-                    # Format entity information
-                    if entities:
-                        entity_list = "\n".join([
-                            f"- {e.get('name', 'Unknown')}: {e.get('description', 'No description')}" 
-                            for e in entities[:5]
-                        ])
-                        cognee_context += f"\n\n**GRAPH ENTITIES**:\n{entity_list}"
-                    
-                    logger.info(f"✅ Cognee success: {len(entities)} entities, confidence={confidence:.2f}")
-                else:
-                    logger.warning("⚠️ Cognee returned insufficient results, falling back to vector store")
-                    
-            except asyncio.TimeoutError:
-                logger.warning("⏱️ Cognee query timed out (15s), falling back to vector store")
-                
-        except Exception as e:
-            logger.warning(f"⚠️ Cognee failed: {str(e)[:100]}, falling back to vector store")
+    if depth == LLMService.DEPTH_EVALUATIVE:
+        config.graph_weight = 0.5  # Higher graph weight for detailed evaluation
+        config.hops = 2            # Deeper traversal
+    elif depth == LLMService.DEPTH_IMPROVEMENT:
+        config.alpha = 0.4         # More keyword focus to find specific errors
+        config.graph_weight = 0.3
     
-    # ========== FALLBACK/HYBRID: VECTOR STORE ==========
-    # Always fetch vector results to augment or replace graph results
     try:
-        logger.info("🔍 Vector store retrieval (augmentation/fallback)")
-        vector_results = vector_store.retrieve_with_citations(query, k=5, use_hybrid=True, use_reranking=True)
+        # execute hybrid search
+        result = await hybrid_search_service.search(
+            query=query,
+            document_ids=document_ids,
+            config=config
+        )
         
-        if not vector_results or len(vector_results) == 0:
-            if retrieval_method == "cognee_graph":
-                # Return just graph results if vector fails but graph worked
-                return {
-                    "full_context": cognee_context,
-                    "document_name": "Knowledge Graph",
-                    "confidence": confidence,
-                    "entities": entities,
-                    "graph_evidence": graph_evidence,
-                    "retrieval_method": "cognee_graph"
-                }
-            else:
-                return {
-                    "full_context": "No documents uploaded yet. Please upload a document first.",
-                    "document_name": "None",
-                    "confidence": 0.0,
-                    "entities": [],
-                    "graph_evidence": [],
-                    "retrieval_method": "none"
-                }
-        
-        # Format vector results
-        context_parts = []
-        for r in vector_results:
-            doc = r.get('doc_name', 'Unknown')
-            content = r.get('content', '')
-            score = r.get('score', 0.0)
-            context_parts.append(f"[{doc}] (Score: {score:.2f})\n{content}")
-        
-        vector_context = "\n\n---\n\n".join(context_parts)
-        logger.info(f"✅ Vector store: {len(vector_results)} chunks")
-        
-        # Combine results (Hybrid)
-        if retrieval_method == "cognee_graph":
-            logger.info("🔗 Merging Graph + Vector results")
-            full_context = f"**KNOWLEDGE GRAPH INSIGHTS**:\n{cognee_context}\n\n**DOCUMENT TEXT SEGMENTS**:\n{vector_context}"
-            return {
-                "full_context": full_context,
-                "document_name": "Hybrid (Graph + Vector)",
-                "confidence": max(confidence, 0.8),
-                "entities": entities,
-                "graph_evidence": graph_evidence,
-                "retrieval_method": "hybrid"
-            }
-        else:
-            return {
-                "full_context": vector_context,
-                "document_name": vector_results[0].get('doc_name', 'Unknown'),
-                "confidence": 0.75,
-                "entities": entities, # Empty if graph failed
-                "graph_evidence": [],
-                "retrieval_method": "vector_store_fallback"
-            }
+        return {
+            "full_context": result["full_context"],
+            "document_name": "Hybrid Knowledge Base",
+            "confidence": result["confidence"],
+            "entities": [{"name": e} for e in result["entities"]],
+            "graph_evidence": [], # populated by graph expansion
+            "retrieval_method": "hybrid_fusion"
+        }
         
     except Exception as e:
-        logger.error(f"❌ Vector store failed: {e}")
-        if retrieval_method == "cognee_graph":
-             return {
-                "full_context": cognee_context,
-                "document_name": "Knowledge Graph",
-                "confidence": confidence,
-                "entities": entities,
-                "graph_evidence": graph_evidence,
-                "retrieval_method": "cognee_graph"
-            }
+        logger.error(f"Hybrid search failed: {e}", exc_info=True)
+        # Fallback to simple vector search if everything explodes
         return {
-            "full_context": "System error retrieving documents.",
+            "full_context": "Error retrieving context. Please try again.",
             "document_name": "Error",
             "confidence": 0.0,
             "entities": [],

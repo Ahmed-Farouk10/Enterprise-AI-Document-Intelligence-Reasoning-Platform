@@ -175,6 +175,95 @@ class Neo4jService:
             }
 
 
+    async def parametric_search(self, query_text: str, limit: int = 10) -> List[Dict]:
+        """
+        Search for nodes based on text properties (fuzzy match).
+        Used to find 'seed entities' in the graph from user query.
+        """
+        if not self.driver:
+            self.connect()
+            
+        try:
+            with self.driver.session() as session:
+                # Search across common text properties
+                query = """
+                MATCH (n)
+                WHERE 
+                    toLower(n.name) CONTAINS toLower($text) OR
+                    toLower(n.title) CONTAINS toLower($text) OR
+                    toLower(n.description) CONTAINS toLower($text) OR
+                    toLower(n.label) CONTAINS toLower($text)
+                RETURN n
+                LIMIT $limit
+                """
+                result = session.run(query, text=query_text, limit=limit)
+                
+                nodes = []
+                for record in result:
+                    node = record["n"]
+                    nodes.append({
+                        "id": str(node.element_id),
+                        "element_id": str(node.element_id), # Keep consistent
+                        "name": node.get("name", node.get("title", "Unknown")),
+                        "labels": list(node.labels),
+                        "properties": dict(node)
+                    })
+                return nodes
+        except Exception as e:
+            logger.error(f"Parametric search failed: {e}")
+            return []
+
+    async def expand_context(self, seed_ids: List[str], hops: int = 1, limit: int = 50) -> List[Dict]:
+        """
+        Traverse graph from seed nodes to find relevant context.
+        Returns a list of 'facts' or 'triples' (Source -> Rel -> Target).
+        """
+        if not self.driver:
+            self.connect()
+            
+        if not seed_ids:
+            return []
+            
+        try:
+            with self.driver.session() as session:
+                # Traverse relationships from seeds
+                # We use elementId for lookup if possible, or assume properties.id if that's how we stored them
+                # For safety, we try both property-based ID and system elementId matching if the passed IDs look like system IDs
+                
+                query = """
+                MATCH (source)-[r]->(target)
+                WHERE 
+                    (source.id IN $ids OR elementId(source) IN $ids)
+                RETURN source, r, target
+                LIMIT $limit
+                """
+                
+                result = session.run(query, ids=seed_ids, limit=limit)
+                
+                triples = []
+                for record in result:
+                    s = record["source"]
+                    r = record["r"]
+                    t = record["target"]
+                    
+                    s_name = s.get("name", s.get("title", "Unknown"))
+                    t_name = t.get("name", t.get("title", "Unknown"))
+                    r_type = r.type
+                    
+                    # Create a readable 'fact'
+                    triples.append({
+                        "source": s_name,
+                        "relationship": r_type,
+                        "target": t_name,
+                        "text": f"{s_name} {r_type} {t_name}",
+                        "weight": 1.0  # Default weight for graph facts
+                    })
+                    
+                return triples
+        except Exception as e:
+            logger.error(f"Context expansion failed: {e}")
+            return []
+
 # Singleton instance
 neo4j_service = Neo4jService()
 

@@ -52,3 +52,4 @@ gunicorn>=21.2.0
 slowapi>=0.1.9
 playwright>=1.41.0
 protego>=0.3.0
+redis>=5.0.0
