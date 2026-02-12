@@ -434,7 +434,7 @@ async def stream_message(
             )
             
         except Exception as e:
-            logger.error("stream_error", error=str(e))
+            logger.error(f"stream_error: {str(e)}")
             yield _sse_event("error", str(e))
     
     return StreamingResponse(event_generator(), media_type="text/event-stream")
