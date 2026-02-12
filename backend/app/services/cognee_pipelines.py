@@ -89,7 +89,7 @@ async def extract_resume_entities(text: str) -> Resume:
        - Career summary or objective statement
        - Key highlights
     
-    3. WORK HISTORY (for each position):
+    3. WORK HISTORY (Extract ALL positions, do not skip any):
        - Company/organization name
        - Job title
        - Start date and end date (use 'Present' if current)
@@ -105,11 +105,11 @@ async def extract_resume_entities(text: str) -> Resume:
        - Graduation date
        - GPA and honors if mentioned
     
-    5. SKILLS:
-       - Technical skills with proficiency levels if stated
-       - Soft skills
-       - Years of experience per skill if calculable
-       - Categorize as: technical, soft, language, certification
+    5. SKILLS (CRITICAL: Extract ALL skills mentioned):
+       - Scan the ENTIRE text (summary, work history, skills section).
+       - Extract every tool, technology, language, and soft skill.
+       - If a list is provided (e.g., "Python, Java, C++"), extract EACH as a separate item.
+       - Inference level: "Expert" (5+ yrs/Senior), "Advanced" (3+ yrs), "Intermediate" (1+ yr), "Beginner".
     
     6. ADDITIONAL:
        - Certifications
@@ -117,12 +117,17 @@ async def extract_resume_entities(text: str) -> Resume:
        - Calculate total years of experience from work history
     
     IMPORTANT RULES:
-    - Only extract information EXPLICITLY stated in the text
-    - Use null/empty for missing information - do NOT make assumptions
-    - For dates, preserve the format from the text (YYYY-MM, YYYY, etc.)
-    - For current positions, use "Present" as end_date
-    - Calculate duration_months accurately from start/end dates
-    - Group related skills (e.g., Python, Java → technical)
+    - Only extract information EXPLICITLY stated.
+    - Use null/empty for missing info.
+    - Dates: Preserve format (YYYY-MM).
+    - Current roles: end_date = "Present".
+    - Skills: If you see a comma-separated list, break it down!
+    
+    EXAMPLE SKILL OUTPUT FORMAT (for guidance):
+    "skills": [
+      {"name": "Python", "category": "technical", "level": "expert"}, 
+      {"name": "Project Management", "category": "soft", "level": "advanced"}
+    ]
     
     Return as a Resume object with all nested structures properly populated.
     """

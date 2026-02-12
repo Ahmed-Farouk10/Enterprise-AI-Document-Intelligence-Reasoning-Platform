@@ -81,10 +81,25 @@ async def upload_document(request: Request, response: Response, file: UploadFile
                     text = f.read()
                 logger.info(f"📝 Extracted {len(text)} chars from TXT")
             elif file.content_type == "application/pdf":
-                import pdfplumber
-                with pdfplumber.open(file_path) as pdf:
-                    text = "\n\n".join([page.extract_text() or "" for page in pdf.pages])
-                logger.info(f"📝 Extracted {len(text)} chars from PDF ({len(pdf.pages)} pages)")
+                try:
+                    import pdfplumber
+                    with pdfplumber.open(file_path) as pdf:
+                        text = "\n\n".join([page.extract_text() or "" for page in pdf.pages])
+                    logger.info(f"📝 Extracted {len(text)} chars from PDF via pdfplumber")
+                except Exception as plumber_error:
+                    logger.warning(f"⚠️ pdfplumber failed: {plumber_error}. Falling back to pypdf.")
+                    text = "" # Reset
+                    
+                # Fallback to pypdf if plumber failed or returned empty text
+                if not text or len(text.strip()) < 50:
+                    try:
+                        import pypdf
+                        reader = pypdf.PdfReader(file_path)
+                        text = "\n\n".join([page.extract_text() or "" for page in reader.pages])
+                        logger.info(f"📝 Extracted {len(text)} chars from PDF via pypdf (Fallback)")
+                    except Exception as pypdf_error:
+                        logger.error(f"❌ pypdf fallback also failed: {pypdf_error}")
+                        # If both fail, let text be empty and handled below
         except Exception as extraction_error:
             logger.error(f"❌ Text extraction failed: {extraction_error}", exc_info=True)
             document.status = "failed"
