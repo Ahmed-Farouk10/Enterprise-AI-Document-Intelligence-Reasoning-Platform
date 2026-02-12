@@ -42,6 +42,7 @@ class CogneeSettings(BaseSettings):
 
     # Default User for Cognee operations
     DEFAULT_USER_ID: str = os.getenv("COGNEE_DEFAULT_USER_ID", "5e5ab0cc-892c-4c79-a8f7-2938f649efcd")
+    COGNEE_API_KEY: Optional[str] = os.getenv("COGNEE_API_KEY")
 
     # Vector Store (Local LanceDB for spaces)
     COGNEE_VECTOR_DB_TYPE: str = "lancedb"
@@ -76,6 +77,7 @@ os.environ["COGNEE_GRAPH_DB_TYPE"] = settings.COGNEE_GRAPH_DB_TYPE
 os.environ["COGNEE_GRAPH_URL"] = settings.COGNEE_GRAPH_URL
 os.environ["COGNEE_VECTOR_DB_TYPE"] = settings.COGNEE_VECTOR_DB_TYPE
 os.environ["COGNEE_VECTOR_DB_URL"] = settings.COGNEE_VECTOR_DB_URL
+os.environ["COGNEE_API_KEY"] = settings.COGNEE_API_KEY or ""
 
 # CRITICAL: Set standard variables for Cognee 0.5.x
 os.environ["EMBEDDING_PROVIDER"] = settings.EMBEDDING_PROVIDER

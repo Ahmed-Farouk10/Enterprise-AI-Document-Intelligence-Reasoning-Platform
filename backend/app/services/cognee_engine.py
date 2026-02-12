@@ -819,12 +819,22 @@ class CogneeEngine:
             try:
                 # Perform a broad search to get graph elements
                 # Insights type often returns relationships/paths
-                search_results = await cognee.search(
-                    query_text="*", 
-                    query_type=SearchType.INSIGHTS,
-                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)),
-                    limit=limit
-                )
+                try:
+                    search_results = await cognee.search(
+                        query_text="*", 
+                        query_type=SearchType.INSIGHTS,
+                        user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)),
+                        limit=limit
+                    )
+                except Exception as kuzu_e:
+                    logger.warning(f"Kuzu extraction failed with INSIGHTS: {kuzu_e}. Retrying with GRAPH_COMPLETION.")
+                    # GRAPH_COMPLETION is more robust on Kuzu schema issues
+                    search_results = await cognee.search(
+                        query_text="*", 
+                        query_type=SearchType.GRAPH_COMPLETION,
+                        user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)),
+                        limit=limit
+                    )
                 
                 nodes = []
                 edges = []

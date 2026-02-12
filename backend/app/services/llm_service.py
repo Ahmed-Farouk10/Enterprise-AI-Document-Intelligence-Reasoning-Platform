@@ -305,6 +305,53 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                 
             return "I apologize, but I'm currently unable to process this request due to system limitations. Please try again later."
 
+    def _generate_via_inference_api_stream(
+        self,
+        prompt: Any,
+        max_tokens: int = 1024,
+        temperature: float = 0.3,
+        top_p: float = 0.9
+    ) -> Generator[str, None, None]:
+        """
+        Streaming generation via HuggingFace Inference API.
+        """
+        self._check_circuit()
+        
+        try:
+            from huggingface_hub import InferenceClient
+            
+            client = InferenceClient(token=os.getenv("HF_TOKEN"))
+            
+            # Format inputs
+            if isinstance(prompt, list):
+                messages = prompt
+            else:
+                messages = [{"role": "user", "content": str(prompt)}]
+            
+            yield "[STREAM_START]\n"
+            
+            # Use chat_completion with stream=True
+            for chunk in client.chat_completion(
+                messages=messages,
+                model=self.model_name,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                stream=True
+            ):
+                token = chunk.choices[0].delta.content
+                if token:
+                    yield token
+            
+            yield "\n[STREAM_END]"
+            self._record_success()
+            
+        except Exception as e:
+            self._record_failure()
+            logger.error(f"HF Inference API Stream failed: {e}")
+            yield f"\n⚠️ [ERROR] Inference API failed: {str(e)}"
+            yield "\n[STREAM_END]"
+
     # ==================== INTENT & SCOPE CLASSIFICATION ====================
     
     def classify_intent(self, query: str) -> str:
@@ -602,7 +649,17 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         self._ensure_loaded()
         
         messages = self._prepare_messages(system_prompt, document_context, question)
+
+        # Fallback to Inference API if model not loaded
+        if self.model is None:
+            logger.info("Using HuggingFace Inference API for streaming")
+            return self._generate_via_inference_api_stream(
+                prompt=messages,
+                max_tokens=max_new_tokens,
+                temperature=temperature
+            )
         
+        # Local generation (original logic)
         text = self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,
