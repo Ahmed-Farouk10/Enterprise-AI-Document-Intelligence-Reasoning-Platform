@@ -336,7 +336,7 @@ class CogneeEngine:
             # Extract filename from metadata if provided (for logging only)
             filename = metadata.get("filename", "unknown") if metadata else "unknown"
             
-                try:
+            try:
                 # Cognee 0.5.2 add() linked to user for auditing
                 # Add aggressive timeout (increased for HF Spaces)
                 await asyncio.wait_for(
