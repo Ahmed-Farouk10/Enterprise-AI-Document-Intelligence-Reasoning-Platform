@@ -451,69 +451,84 @@ async def _get_retrieved_context(query: str, depth: str, document_ids: List[str]
     entities = []
     confidence = 0.0
     graph_evidence = []
+    retrieval_method = "none"
     
-    try:
-        logger.info("🧠 Cognee graph retrieval (primary)")
-        
-        # Map depth to analysis mode
-        mode = AnalysisMode.SUMMARIZATION
-        if depth == LLMService.DEPTH_EVALUATIVE:
-            mode = AnalysisMode.ENTITY_EXTRACTION
-        elif depth == LLMService.DEPTH_IMPROVEMENT:
-            mode = AnalysisMode.RELATIONSHIP_MAPPING
-        
-        # Query Cognee knowledge graph
-        result = await cognee_engine.query(
-            question=query,
-            document_ids=document_ids,
-            mode=mode,
-            include_subgraph=False
-        )
-        
-        if result.answer and len(result.answer.strip()) > 20:
-            cognee_context = result.answer
-            entities = result.entities_involved
-            confidence = result.confidence_score
-            graph_evidence = result.evidence_paths
+    # Try Cognee if documents are available
+    if document_ids:
+        try:
+            logger.info(f"🧠 Cognee graph retrieval (primary) for docs: {document_ids}")
             
-            # Format entity information
-            if entities:
-                entity_list = "\n".join([
-                    f"- {e.get('name', 'Unknown')}: {e.get('description', 'No description')}" 
-                    for e in entities[:5]
-                ])
-                cognee_context += f"\n\n**GRAPH ENTITIES**:\n{entity_list}"
+            # Map depth to analysis mode
+            mode = AnalysisMode.SUMMARIZATION
+            if depth == LLMService.DEPTH_EVALUATIVE:
+                mode = AnalysisMode.ENTITY_EXTRACTION
+            elif depth == LLMService.DEPTH_IMPROVEMENT:
+                mode = AnalysisMode.RELATIONSHIP_MAPPING
             
-            logger.info(f"✅ Cognee: {len(entities)} entities, confidence={confidence:.2f}")
-            
-            return {
-                "full_context": cognee_context,
-                "document_name": "Knowledge Graph",
-                "confidence": confidence,
-                "entities": entities,
-                "graph_evidence": graph_evidence,
-                "retrieval_method": "cognee_graph"
-            }
-        else:
-            logger.warning("⚠️ Cognee returned insufficient results, falling back to vector store")
-            
-    except Exception as e:
-        logger.warning(f"⚠️ Cognee failed: {str(e)[:100]}, falling back to vector store")
+            # Query Cognee knowledge graph with stricter timeout
+            # We use a shorter timeout here to fallback quickly if graph is slow
+            try:
+                result = await asyncio.wait_for(
+                    cognee_engine.query(
+                        question=query,
+                        document_ids=document_ids,
+                        mode=mode,
+                        include_subgraph=False
+                    ),
+                    timeout=15.0  # 15s timeout for graph query
+                )
+                
+                if result.answer and len(result.answer.strip()) > 20 and result.confidence_score > 0.1:
+                    cognee_context = result.answer
+                    entities = result.entities_involved
+                    confidence = result.confidence_score
+                    graph_evidence = result.evidence_paths
+                    retrieval_method = "cognee_graph"
+                    
+                    # Format entity information
+                    if entities:
+                        entity_list = "\n".join([
+                            f"- {e.get('name', 'Unknown')}: {e.get('description', 'No description')}" 
+                            for e in entities[:5]
+                        ])
+                        cognee_context += f"\n\n**GRAPH ENTITIES**:\n{entity_list}"
+                    
+                    logger.info(f"✅ Cognee success: {len(entities)} entities, confidence={confidence:.2f}")
+                else:
+                    logger.warning("⚠️ Cognee returned insufficient results, falling back to vector store")
+                    
+            except asyncio.TimeoutError:
+                logger.warning("⏱️ Cognee query timed out (15s), falling back to vector store")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Cognee failed: {str(e)[:100]}, falling back to vector store")
     
-    # ========== FALLBACK: VECTOR STORE ==========
+    # ========== FALLBACK/HYBRID: VECTOR STORE ==========
+    # Always fetch vector results to augment or replace graph results
     try:
-        logger.info("🔍 Vector store retrieval (fallback)")
+        logger.info("🔍 Vector store retrieval (augmentation/fallback)")
         vector_results = vector_store.retrieve_with_citations(query, k=5, use_hybrid=True, use_reranking=True)
         
         if not vector_results or len(vector_results) == 0:
-            return {
-                "full_context": "No documents uploaded yet. Please upload a document first.",
-                "document_name": "None",
-                "confidence": 0.0,
-                "entities": [],
-                "graph_evidence": [],
-                "retrieval_method": "none"
-            }
+            if retrieval_method == "cognee_graph":
+                # Return just graph results if vector fails but graph worked
+                return {
+                    "full_context": cognee_context,
+                    "document_name": "Knowledge Graph",
+                    "confidence": confidence,
+                    "entities": entities,
+                    "graph_evidence": graph_evidence,
+                    "retrieval_method": "cognee_graph"
+                }
+            else:
+                return {
+                    "full_context": "No documents uploaded yet. Please upload a document first.",
+                    "document_name": "None",
+                    "confidence": 0.0,
+                    "entities": [],
+                    "graph_evidence": [],
+                    "retrieval_method": "none"
+                }
         
         # Format vector results
         context_parts = []
@@ -526,17 +541,39 @@ async def _get_retrieved_context(query: str, depth: str, document_ids: List[str]
         vector_context = "\n\n---\n\n".join(context_parts)
         logger.info(f"✅ Vector store: {len(vector_results)} chunks")
         
-        return {
-            "full_context": vector_context,
-            "document_name": vector_results[0].get('doc_name', 'Unknown'),
-            "confidence": 0.75,  # Lower confidence for vector-only
-            "entities": entities,  # Include any entities from failed Cognee attempt
-            "graph_evidence": [],
-            "retrieval_method": "vector_store_fallback"
-        }
+        # Combine results (Hybrid)
+        if retrieval_method == "cognee_graph":
+            logger.info("🔗 Merging Graph + Vector results")
+            full_context = f"**KNOWLEDGE GRAPH INSIGHTS**:\n{cognee_context}\n\n**DOCUMENT TEXT SEGMENTS**:\n{vector_context}"
+            return {
+                "full_context": full_context,
+                "document_name": "Hybrid (Graph + Vector)",
+                "confidence": max(confidence, 0.8),
+                "entities": entities,
+                "graph_evidence": graph_evidence,
+                "retrieval_method": "hybrid"
+            }
+        else:
+            return {
+                "full_context": vector_context,
+                "document_name": vector_results[0].get('doc_name', 'Unknown'),
+                "confidence": 0.75,
+                "entities": entities, # Empty if graph failed
+                "graph_evidence": [],
+                "retrieval_method": "vector_store_fallback"
+            }
         
     except Exception as e:
-        logger.error(f"❌ Both Cognee and vector store failed: {e}")
+        logger.error(f"❌ Vector store failed: {e}")
+        if retrieval_method == "cognee_graph":
+             return {
+                "full_context": cognee_context,
+                "document_name": "Knowledge Graph",
+                "confidence": confidence,
+                "entities": entities,
+                "graph_evidence": graph_evidence,
+                "retrieval_method": "cognee_graph"
+            }
         return {
             "full_context": "System error retrieving documents.",
             "document_name": "Error",
