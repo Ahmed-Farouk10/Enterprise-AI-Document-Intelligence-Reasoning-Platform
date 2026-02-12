@@ -1,6 +1,7 @@
 # app/api/chat.py
 import asyncio
 import logging
+from app.core.logging_config import get_logger
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -18,7 +19,7 @@ from app.services.cognee_engine import cognee_engine, AnalysisMode, GraphQueryRe
 from app.services.verification_service import get_verification_service
 import json
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
@@ -434,7 +435,7 @@ async def stream_message(
             )
             
         except Exception as e:
-            logger.error(f"stream_error: {str(e)}")
+            logger.error("stream_error", error=str(e))
             yield _sse_event("error", str(e))
     
     return StreamingResponse(event_generator(), media_type="text/event-stream")
