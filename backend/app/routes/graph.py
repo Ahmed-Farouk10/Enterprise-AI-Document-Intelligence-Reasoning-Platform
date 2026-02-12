@@ -65,6 +65,17 @@ async def get_graph_edges(
         logger.error(f"Edge retrieval failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/api/graph/stats")
+async def get_graph_stats():
+    """Get graph statistics (entity count, relationships, documents)."""
+    try:
+        from app.services.neo4j_service import neo4j_service
+        return await neo4j_service.get_graph_statistics()
+    except Exception as e:
+        logger.error(f"Graph stats retrieval failed: {str(e)}")
+        # Return empty stats on error
+        return {"entity_count": 0, "relationship_count": 0, "document_count": 0}
+
 @router.post("/api/graph/rebuild")
 async def rebuild_graph():
     """

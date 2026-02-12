@@ -29,18 +29,23 @@ class RedisCacheAdapter:
         socket_connect_timeout: float = 5.0,
         retry_on_timeout: bool = True
     ):
-        self.connection_pool = redis.ConnectionPool(
-            host=host,
-            port=port,
-            db=db,
-            password=password,
-            ssl=ssl,
-            max_connections=max_connections,
-            socket_timeout=socket_timeout,
-            socket_connect_timeout=socket_connect_timeout,
-            retry_on_timeout=retry_on_timeout,
-            decode_responses=False  # We'll handle decoding manually for binary data
-        )
+        pool_kwargs = {
+            "host": host,
+            "port": port,
+            "db": db,
+            "password": password,
+            "max_connections": max_connections,
+            "socket_timeout": socket_timeout,
+            "socket_connect_timeout": socket_connect_timeout,
+            "retry_on_timeout": retry_on_timeout,
+            "decode_responses": False
+        }
+        
+        # Only add SSL if enabled, to avoid 'unexpected keyword argument' error
+        if ssl:
+            pool_kwargs["ssl"] = True
+            
+        self.connection_pool = redis.ConnectionPool(**pool_kwargs)
         self._client: Optional[redis.Redis] = None
     
     async def connect(self):

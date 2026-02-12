@@ -315,7 +315,7 @@ async def stream_message(
     # Get/Create Session Context
     # We use the session_id from the URL as the consistent ID
     sm_session = await session_manager.get_or_create_session(user_id="default_user", session_id=session_id)
-    history = sm_session.get("context", [])
+    history = sm_session.messages if sm_session else []
     
     # Save user message to context manager
     session_manager.update_session_context(
