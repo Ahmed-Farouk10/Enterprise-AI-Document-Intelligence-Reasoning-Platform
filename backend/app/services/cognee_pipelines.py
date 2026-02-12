@@ -319,222 +319,211 @@ async def extract_work_history_timeline(text: str) -> List[WorkExperience]:
 
 # ==================== CUSTOM PIPELINES ====================
 
-async def process_resume_document(
-    text: str,
-    document_id: str,
-    document_type: str = "resume",
-    timeout_seconds: int = 60  # Increased from 30s
-) -> Resume:
-    """
-    Direct Resume Processing Pipeline (Bypassing Cognee run_pipeline wrapper).
-    Fixes Problem 6: Resume Pipeline Timeout
-    """
+# ==================== NEW DOMAIN EXTRACTION TASKS ====================
+
+async def extract_legal_entities(text: str) -> 'Contract':
+    """Extract structured data from legal contracts"""
+    from app.models.ontologies import Contract
+    if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
     
-    if not COGNEE_AVAILABLE:
-        raise RuntimeError("Cognee not available - professional pipeline disabled")
+    system_prompt = """
+    Extract structured legal data from this contract.
+    Identify:
+    1. Parties (Name, Role, Address)
+    2. Key Dates (Effective, Termination)
+    3. Jurisdiction
+    4. Clauses (ID, Title, Type, Obligations)
+    5. Financial Terms
     
-    logger.info(f"🚀 Starting DIRECT resume pipeline for doc {document_id}")
-    dataset_name = f"resume_{document_id}"
+    Be precise with Clause IDs and Obligations.
+    """
     
     try:
-        # Step 1: Direct Extraction with Strict Timeout
-        try:
-            resume = await asyncio.wait_for(
-                extract_resume_entities(text),  # Already uses Custom Engine
-                timeout=timeout_seconds
-            )
-        except asyncio.TimeoutError:
-            logger.warning(f"⏰ Extraction timed out ({timeout_seconds}s). Using minimal fallback.")
-            # Basic fallback to keep flow moving
-            resume = Resume(
-                person=Person(name="Unknown Candidate (Timeout)"),
-                work_history=[],
-                education=[],
-                skills=[]
-            )
-
-        # Step 2: Direct Storage (Bypassing pipeline queue)
-        logger.info(f"💾 Storing resume entities for {dataset_name}...")
-        try:
-            # Manually push to Cognee memory
-            # Note: add_data_points typically expects list of datapoints and dataset name
-            await add_data_points(
-                data=[resume], 
-                dataset_name=dataset_name,
-                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
-            )
-            
-            # Cognify specifically for this dataset to ensure Neo4j sync
-            await cognee.cognify(
-                datasets=[dataset_name], 
-                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
-            )
-            
-            logger.info(f"✅ Data points stored successfully")
-        except Exception as storage_error:
-            logger.error(f"⚠️ Storage failed (non-critical): {storage_error}")
-            # Continue even if storage fails, to return result to frontend
-            
-        logger.info(
-            f"✅ Pipeline complete: "
-            f"{len(resume.work_history)} positions, "
-            f"{len(resume.education)} degrees, "
-            f"{len(resume.skills)} skills"
+        from app.services.custom_cognee_llm import CustomCogneeLLMEngine
+        engine = CustomCogneeLLMEngine()
+        result = await asyncio.wait_for(
+            engine.acreate_structured_output(text, Contract, system_prompt),
+            timeout=60.0
         )
-        
-        return resume
-        
+        return result
     except Exception as e:
-        logger.error(f"❌ Resume processing failed: {e}", exc_info=True)
-        # Final fallback
-        return Resume(person=Person(name="Error Processing"), work_history=[], education=[], skills=[])
-
-
-async def process_generic_document(
-    text: str,
-    document_id: str,
-    document_type: str = "document"
-) -> Dict[str, Any]:
-    """
-    Generic document processing for non-resume documents.
-    
-    Falls back to basic Cognee ingestion for documents that don't
-    match our specialized pipelines.
-    
-    Args:
-        text: Document text
-        document_id: Unique document identifier
-        document_type: Type of document
-        
-    Returns:
-        Dict with processing status
-    """
-    
-    if not COGNEE_AVAILABLE:
-        raise RuntimeError("Cognee not available")
-    
-    logger.info(f"📄 Processing {document_type} with generic pipeline")
-    
-    try:
-        # Use Professional Workflow (Problem 7 Fix) to bypass internal OpenAI defaults
-        result = await professional_ingestion_workflow(text, document_id)
-        
-        dataset_name = f"doc_{document_id}"
-        logger.info(f"✅ Generic document processed via Professional Workflow: {dataset_name}")
-        
-        return {
-            "success": True,
-            "dataset": dataset_name,
-            "document_type": document_type,
-            "metadata": result
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Generic pipeline failed: {e}", exc_info=True)
+        logger.error(f"Legal extraction failed: {e}")
         raise
 
+async def extract_financial_entities(text: str) -> 'Invoice':
+    """Extract structured data from financial documents/invoices"""
+    from app.models.ontologies import Invoice
+    if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
+    
+    system_prompt = """
+    Extract structured invoice data.
+    Identify:
+    1. Invoice Number, Dates (Issue, Due)
+    2. Vendor and Customer details
+    3. Line Items (Description, Qty, Price, Amount)
+    4. Totals (Subtotal, Tax, Grand Total)
+    5. Currency
+    
+    Ensure strict numerical accuracy for amounts.
+    """
+    
+    try:
+        from app.services.custom_cognee_llm import CustomCogneeLLMEngine
+        engine = CustomCogneeLLMEngine()
+        result = await asyncio.wait_for(
+            engine.acreate_structured_output(text, Invoice, system_prompt),
+            timeout=45.0
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Financial extraction failed: {e}")
+        raise
+
+async def extract_education_entities(text: str) -> 'CourseMaterial':
+    """Extract structured data from educational content"""
+    from app.models.ontologies import CourseMaterial
+    if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
+    
+    system_prompt = """
+    Extract structured educational content.
+    Identify:
+    1. Course/Material Title, Subject, Level
+    2. Chapters/Sections (Number, Title, Summary)
+    3. Key Concepts (Term, Definition)
+    4. Learning Objectives
+    
+    Focus on hierarchical structure (Course -> Chapter -> Concept).
+    """
+    
+    try:
+        from app.services.custom_cognee_llm import CustomCogneeLLMEngine
+        engine = CustomCogneeLLMEngine()
+        result = await asyncio.wait_for(
+            engine.acreate_structured_output(text, CourseMaterial, system_prompt),
+            timeout=90.0
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Education extraction failed: {e}")
+        raise
+
+# ==================== CUSTOM PIPELINES (EXPANDED) ====================
+
+async def process_resume_document(text: str, document_id: str, document_type: str = "resume", timeout_seconds: int = 60) -> Any:
+    """Direct Resume Processing Pipeline"""
+    if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
+    logger.info(f"🚀 Starting RESUME pipeline for {document_id}")
+    try:
+        resume = await asyncio.wait_for(extract_resume_entities(text), timeout=timeout_seconds)
+        dataset_name = f"resume_{document_id}"
+        await _store_and_cognify([resume], dataset_name)
+        return resume
+    except Exception as e:
+        logger.error(f"Resume pipeline failed: {e}")
+        from app.models.cognee_models import Resume, Person
+        return Resume(person=Person(name="Error"), work_history=[], education=[], skills=[])
+
+async def process_legal_document(text: str, document_id: str) -> Any:
+    """Direct Legal Processing Pipeline"""
+    logger.info(f"🚀 Starting LEGAL pipeline for {document_id}")
+    try:
+        contract = await extract_legal_entities(text)
+        dataset_name = f"contract_{document_id}"
+        await _store_and_cognify([contract], dataset_name)
+        return contract
+    except Exception as e:
+        logger.error(f"Legal pipeline failed: {e}")
+        return {"error": str(e)}
+
+async def process_financial_document(text: str, document_id: str) -> Any:
+    """Direct Financial Processing Pipeline"""
+    logger.info(f"🚀 Starting FINANCIAL pipeline for {document_id}")
+    try:
+        invoice = await extract_financial_entities(text)
+        dataset_name = f"invoice_{document_id}"
+        await _store_and_cognify([invoice], dataset_name)
+        return invoice
+    except Exception as e:
+        logger.error(f"Financial pipeline failed: {e}")
+        return {"error": str(e)}
+
+async def process_education_document(text: str, document_id: str) -> Any:
+    """Direct Education Processing Pipeline"""
+    logger.info(f"🚀 Starting EDUCATION pipeline for {document_id}")
+    try:
+        course = await extract_education_entities(text)
+        dataset_name = f"course_{document_id}"
+        await _store_and_cognify([course], dataset_name)
+        return course
+    except Exception as e:
+        logger.error(f"Education pipeline failed: {e}")
+        return {"error": str(e)}
+
+async def _store_and_cognify(data_points: List[Any], dataset_name: str):
+    """Helper to store data and trigger Cognify"""
+    try:
+        await add_data_points(data=data_points, dataset_name=dataset_name, user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)))
+        await cognee.cognify(datasets=[dataset_name], user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)))
+        logger.info(f"✅ Data stored & cognified for {dataset_name}")
+    except Exception as e:
+        logger.error(f"Storage/Cognify failed for {dataset_name}: {e}")
+
+async def process_generic_document(text: str, document_id: str, document_type: str = "document") -> Dict[str, Any]:
+    """Generic fall-back pipeline"""
+    if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
+    logger.info(f"📄 Processing GENERIC document {document_id}")
+    try:
+        await professional_ingestion_workflow(text, document_id)
+        return {"success": True, "dataset": f"doc_{document_id}", "type": "generic"}
+    except Exception as e:
+        logger.error(f"Generic pipeline failed: {e}")
+        raise
 
 # ==================== HELPER FUNCTIONS ====================
 
 def detect_document_type(text: str) -> str:
-    """
-    Auto-detect document type from content.
+    """Auto-detect document type from content using keyword scoring"""
+    text_lower = text.lower()[:5000] # Check first 5k chars
     
-    Args:
-        text: Document text
-        
-    Returns:
-        str: Detected type ("resume", "contract", "report", etc.)
-    """
-    text_lower = text.lower()
+    scores = {
+        "resume": sum(1 for kw in ["experience", "education", "skills", "resume", "cv", "career"] if kw in text_lower),
+        "contract": sum(1 for kw in ["agreement", "contract", "parties", "whereas", "section", "jurisdiction"] if kw in text_lower),
+        "invoice": sum(1 for kw in ["invoice", "total", "tax", "due date", "bill to", "amount"] if kw in text_lower),
+        "education": sum(1 for kw in ["chapter", "syllabus", "learning objective", "course", "lecture", "student"] if kw in text_lower)
+    }
     
-    # Resume indicators
-    resume_keywords = [
-        "experience", "education", "skills", "work history",
-        "employment", "resume", "cv", "curriculum vitae"
-    ]
-    
-    # Contract indicators
-    contract_keywords = [
-        "agreement", "contract", "party", "terms and conditions",
-        "whereas", "hereby", "covenant"
-    ]
-    
-    resume_score = sum(1 for kw in resume_keywords if kw in text_lower)
-    contract_score = sum(1 for kw in contract_keywords if kw in text_lower)
-    
-    if resume_score > contract_score and resume_score >= 3:
-        return "resume"
-    elif contract_score > resume_score and contract_score >= 3:
-        return "contract"
-    else:
-        return "document"  # Generic
+    best_match = max(scores, key=scores.get)
+    if scores[best_match] >= 2:
+        return best_match
+    return "document"
 
-
-async def route_to_pipeline(
-    text: str,
-    document_id: str,
-    document_type: Optional[str] = None
-) -> Any:
-    """
-    Smart routing to appropriate processing pipeline.
-    
-    Args:
-        text: Document text
-        document_id: Document ID
-        document_type: Optional explicit type, will auto-detect if None
-        
-    Returns:
-        Processed result (Resume, Contract, or generic dict)
-    """
-    
-    # Auto-detect if not specified
-    if document_type is None or document_type == "auto_detect":
+async def route_to_pipeline(text: str, document_id: str, document_type: Optional[str] = None) -> Any:
+    """Smart routing to appropriate processing pipeline"""
+    if not document_type or document_type == "auto_detect":
         document_type = detect_document_type(text)
-        logger.info(f"🔍 Auto-detected document type: {document_type}")
+        logger.info(f"🔍 Auto-detected type: {document_type}")
     
-    # Route to appropriate pipeline
     if document_type == "resume":
-        return await process_resume_document(text, document_id, document_type)
+        return await process_resume_document(text, document_id)
+    elif document_type == "contract":
+        return await process_legal_document(text, document_id)
+    elif document_type == "invoice":
+        return await process_financial_document(text, document_id)
+    elif document_type == "education" or document_type == "academic":
+        return await process_education_document(text, document_id)
     else:
-        return await process_generic_document(text, document_id, document_type)
-
+        return await process_generic_document(text, document_id)
 
 async def professional_ingestion_workflow(text: str, document_id: str):
-    """
-    Standard Cognee Pipeline for generic documents using properly configured Engine.
-    Ensures both Vector Store (LanceDB) and Graph Store (Neo4j) are populated.
-    """
+    """Standard Cognee Pipeline for generic documents"""
     logger.info(f"🚀 Starting PROFESSIONAL ingestion workflow for {document_id}")
-    
     try:
         dataset_name = f"doc_{document_id}"
-        user_obj = User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
-
-        # 1. Add document to Cognee (Chunking + Embedding + Graph Nodes)
-        logger.info(f"💾 Adding generic document {document_id} to Cognee...")
-        await asyncio.wait_for(
-            cognee.add(
-                data=text,
-                dataset_name=dataset_name,
-                user=user_obj
-            ),
-            timeout=30.0
-        )
-        
-        # 2. Cognify to build relationships and sync to Neo4j
-        logger.info(f"🔗 Cognifying {dataset_name} for Knowledge Graph...")
-        await asyncio.wait_for(
-            cognee.cognify(
-                datasets=[dataset_name],
-                user=user_obj
-            ),
-            timeout=90.0
-        )
-            
-        logger.info(f"✅ Generic document fully ingested for {document_id}")
+        user_uuid = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
+        await asyncio.wait_for(cognee.add(data=text, dataset_name=dataset_name, user=User(id=user_uuid)), timeout=30.0)
+        await asyncio.wait_for(cognee.cognify(datasets=[dataset_name], user=User(id=user_uuid)), timeout=90.0)
+        logger.info(f"✅ Generic document ingested: {dataset_name}")
         return {"status": "completed", "document_id": document_id}
-        
     except Exception as e:
         logger.error(f"Professional ingestion failed: {e}")
         raise
