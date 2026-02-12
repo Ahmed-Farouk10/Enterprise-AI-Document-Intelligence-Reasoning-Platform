@@ -763,7 +763,7 @@ class CogneeEngine:
         document_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Get graph nodes and edges using Cognee's public API.
+        Get graph nodes and edges using direct Neo4j connection.
         
         Args:
             limit: Maximum number of nodes to return
@@ -773,32 +773,19 @@ class CogneeEngine:
             Dict with 'nodes' and 'edges' lists
         """
         try:
-            logger.info(f"Fetching graph data from Cognee (limit={limit}, document_id={document_id})")
+            logger.info(f"Fetching graph data (limit={limit}, document_id={document_id})")
             
-            # Try using cognee's search API to get graph entities
-            try:
-                search_result = await cognee.search(
-                    "*" if not document_id else f"document:{document_id}",
-                    SearchType.SUMMARIES,
-                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
-                )
+            # Delegate to Neo4j service for direct graph access
+            from app.services.neo4j_service import neo4j_service
+            
+            return await neo4j_service.get_graph_data(
+                limit=limit,
+                document_id=document_id
+            )
                 
-                graph_nodes = []
-                graph_edges = []
-                
-                if isinstance(search_result, list):
-                    for idx, item in enumerate(search_result[:limit]):
-                        node_id = f"node_{idx}"
-                        graph_nodes.append({
-                            "id": node_id,
-                            "label": str(item)[:50] if isinstance(item, str) else f"Entity {idx}",
-                            "type": "entity",
-                            "properties": {"data": str(item)}
-                        })
-                        
-                        # Create relationships between consecutive nodes
-                        if idx > 0:
-                            graph_edges.append({
+        except Exception as e:
+            logger.error(f"Failed to get graph data: {e}", exc_info=True)
+            return {"nodes": [], "edges": []}                            graph_edges.append({
                                 "source": f"node_{idx-1}",
                                 "target": node_id,
                                 "label": "related_to",
