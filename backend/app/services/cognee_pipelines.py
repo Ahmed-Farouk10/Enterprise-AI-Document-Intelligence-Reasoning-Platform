@@ -364,8 +364,11 @@ async def process_resume_document(
                 user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
             )
             
-            # Cognify specifically for this dataset if needed, but adding points usually enough for graph
-            # await cognee.cognify(datasets=[dataset_name], user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))) 
+            # Cognify specifically for this dataset to ensure Neo4j sync
+            await cognee.cognify(
+                datasets=[dataset_name], 
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+            )
             
             logger.info(f"✅ Data points stored successfully")
         except Exception as storage_error:
@@ -499,73 +502,37 @@ async def route_to_pipeline(
 
 async def professional_ingestion_workflow(text: str, document_id: str):
     """
-    Custom workflow bypassing Cognee's internal pipeline completely.
-    Fixes Problem 7: Custom LLM Engine Not Being Used (OpenAI fallback issue)
-    
-    Architecture: External LLM -> Extract Data -> Local Embeddings -> Push to Memory
+    Standard Cognee Pipeline for generic documents using properly configured Engine.
+    Ensures both Vector Store (LanceDB) and Graph Store (Neo4j) are populated.
     """
     logger.info(f"🚀 Starting PROFESSIONAL ingestion workflow for {document_id}")
     
     try:
-        # Step 1: Extract with your own LLM (HF Inference API / Local Qwen)
-        # Using CustomCogneeLLMEngine directly
-        from app.services.custom_cognee_llm import CustomCogneeLLMEngine
-        llm_engine = CustomCogneeLLMEngine()
+        dataset_name = f"doc_{document_id}"
+        user_obj = User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+
+        # 1. Add document to Cognee (Chunking + Embedding + Graph Nodes)
+        logger.info(f"💾 Adding generic document {document_id} to Cognee...")
+        await asyncio.wait_for(
+            cognee.add(
+                data=text,
+                dataset_name=dataset_name,
+                user=user_obj
+            ),
+            timeout=30.0
+        )
         
-        # Determine extraction strategy based on content (e.g. resume vs generic)
-        # For generic docs, we might just want to chunk and embed
-        # For structured docs, we extract entities
-        
-        # Here we demonstrate manual chunking & embedding
-        from app.services.embeddings import SentenceTransformerEmbeddingEngine
-        embed_engine = SentenceTransformerEmbeddingEngine()
-        
-        # 1. Chunk text (simple manual chunking for demonstration)
-        chunks = [text[i:i+1000] for i in range(0, len(text), 1000)]
-        
-        # 2. Embed chunks locally
-        embeddings = []
-        for chunk in chunks:
-            emb = await embed_engine.embed_text(chunk)
-            embeddings.append((chunk, emb))
+        # 2. Cognify to build relationships and sync to Neo4j
+        logger.info(f"🔗 Cognifying {dataset_name} for Knowledge Graph...")
+        await asyncio.wait_for(
+            cognee.cognify(
+                datasets=[dataset_name],
+                user=user_obj
+            ),
+            timeout=90.0
+        )
             
-        # 3. Push to Cognee Memory (Vector Store) directly
-        try:
-            from cognee.infrastructure.databases.vector import get_vector_engine
-            vector_engine = get_vector_engine()
-            
-            # Store embeddings manually
-            # This depends on Cognee's internal vector engine API which might vary
-            # But ensures we bypass LLMGateway
-            
-            # If standard API supports manual add:
-            points = []
-            import uuid
-            for chunk, emb in embeddings:
-                points.append({
-                    "id": str(uuid.uuid4()),
-                    "text": chunk,
-                    "vector": emb,
-                    "metadata": {"document_id": document_id}
-                })
-                
-            if hasattr(vector_engine, "create_collection"):
-                await vector_engine.create_collection(f"doc_{document_id}", embed_engine.get_vector_size())
-            
-            if hasattr(vector_engine, "upsert"):
-                await vector_engine.upsert(f"doc_{document_id}", points)
-                
-            logger.info(f"✅ Manually processed {len(chunks)} chunks for {document_id}")
-            
-        except Exception as e:
-            logger.error(f"Manual vector storage failed: {e}")
-            # Fallback to standard add if manual fails (risky but better than crash)
-            await cognee.add(
-                data=text, 
-                dataset_name=f"doc_{document_id}",
-                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
-            )
-            
+        logger.info(f"✅ Generic document fully ingested for {document_id}")
         return {"status": "completed", "document_id": document_id}
         
     except Exception as e:
