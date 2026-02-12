@@ -19,6 +19,7 @@ class Neo4jService:
         self.user = os.getenv("NEO4J_USER", "neo4j")
         self.password = os.getenv("NEO4J_PASSWORD", "changeme123")
         self.driver: Optional[Driver] = None
+        self._available = False
         
     def connect(self):
         """Establish connection to Neo4j"""
@@ -30,10 +31,15 @@ class Neo4jService:
             # Test connection
             with self.driver.session() as session:
                 session.run("RETURN 1")
+            
+            self._available = True
             logger.info(f"Connected to Neo4j at {self.uri}")
+            
         except Exception as e:
-            logger.error(f"Failed to connect to Neo4j: {e}")
-            raise
+            self.driver = None
+            self._available = False
+            logger.warning(f"Neo4j connection failed: {e}. Graph features will be disabled.")
+            # Do NOT raise, just degrad gracefully
     
     def close(self):
         """Close Neo4j connection"""
@@ -50,6 +56,13 @@ class Neo4jService:
         """
         if not self.driver:
             self.connect()
+            
+        if not self._available or not self.driver:
+            return {
+                "entity_count": 0,
+                "relationship_count": 0,
+                "document_count": 0
+            }
         
         try:
             with self.driver.session() as session:
@@ -100,6 +113,10 @@ class Neo4jService:
         """
         if not self.driver:
             self.connect()
+            
+        if not self._available or not self.driver:
+            logger.warning("Neo4j unavailable - returning empty graph")
+            return {"nodes": [], "edges": []}
         
         try:
             with self.driver.session() as session:
@@ -183,6 +200,9 @@ class Neo4jService:
         if not self.driver:
             self.connect()
             
+        if not self._available or not self.driver:
+            return []
+            
         try:
             with self.driver.session() as session:
                 # Search across common text properties
@@ -221,7 +241,7 @@ class Neo4jService:
         if not self.driver:
             self.connect()
             
-        if not seed_ids:
+        if not self._available or not self.driver:
             return []
             
         try:
