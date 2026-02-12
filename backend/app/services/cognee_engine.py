@@ -797,7 +797,7 @@ class CogneeEngine:
         document_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Get graph nodes and edges using direct Neo4j connection.
+        Get graph nodes and edges using Neo4j (primary) or Kuzu (fallback).
         
         Args:
             limit: Maximum number of nodes to return
@@ -809,18 +809,57 @@ class CogneeEngine:
         try:
             logger.info(f"Fetching graph data (limit={limit}, document_id={document_id})")
             
-            # Delegate to Neo4j service for direct graph access
+            # 1. Try Neo4j first (Direct access)
             from app.services.neo4j_service import neo4j_service
+            if neo4j_service._available:
+                return await neo4j_service.get_graph_data(limit=limit, document_id=document_id)
             
-            return await neo4j_service.get_graph_data(
-                limit=limit,
-                document_id=document_id
-            )
+            # 2. Fallback to Kuzu (via Cognee Search)
+            logger.info("Neo4j unavailable - attempting Kuzu fallback extraction")
+            try:
+                # Perform a broad search to get graph elements
+                # Insights type often returns relationships/paths
+                search_results = await cognee.search(
+                    query_text="*", 
+                    query_type=SearchType.INSIGHTS,
+                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)),
+                    limit=limit
+                )
                 
+                nodes = []
+                edges = []
+                seen_nodes = set()
+                
+                # Transform Cognee results into Graph structure
+                for i, result in enumerate(search_results):
+                    # Cognee results can be complex objects or dicts
+                    # We attempt to extract meaningful node data
+                    val = str(result)
+                    node_id = getattr(result, "id", f"node_{i}")
+                    node_label = getattr(result, "text", val[:50])
+                    node_type = getattr(result, "type", "Entity")
+                    
+                    if node_id not in seen_nodes:
+                        nodes.append({
+                            "id": str(node_id),
+                            "label": node_type,
+                            "properties": {"name": node_label, "full_text": val}
+                        })
+                        seen_nodes.add(node_id)
+                        
+                    # If result has 'graph_path' or relationships, extract edges
+                    # (This depends on specific Cognee 0.5.x result structure)
+                    
+                logger.info(f"Kuzu fallback retrieved {len(nodes)} nodes")
+                return {"nodes": nodes, "edges": edges}
+                
+            except Exception as kuzu_error:
+                logger.warning(f"Kuzu fallback failed: {kuzu_error}")
+                return {"nodes": [], "edges": []}
+
         except Exception as e:
             logger.error(f"Failed to get graph data: {e}", exc_info=True)
             return {"nodes": [], "edges": []}
-
 
 # Singleton instance
 cognee_engine = CogneeEngine()

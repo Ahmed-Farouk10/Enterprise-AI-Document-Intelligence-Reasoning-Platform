@@ -324,11 +324,24 @@ async def stream_message(
         document_ids=session.document_ids
     )
 
-    # Initialize analysis parameters (defaults)
-    # These should ideally come from the request, but for now we default them to prevent crashes
-    intent = "general_analysis"
-    depth = "comprehensive"
-    scope = "document"
+    # 3. Classify and configure analysis
+    intent = llm.classify_intent(message_data.content)
+    depth = llm.classify_depth(message_data.content)
+    scope = llm.detect_scope(message_data.content)
+    
+    # 4. Retrieve document context
+    retrieval_data = await _get_retrieved_context(
+        message_data.content, 
+        depth=depth,
+        document_ids=session.document_ids or []
+    )
+    document_text = retrieval_data["full_context"]
+    
+    # 5. SAFETY GATE
+    if not document_text or len(document_text.strip()) < 50:
+         # For streaming, we need to handle this inside the event generator or return early
+         # We'll handle it inside event_generator to provide a better UX
+         pass
 
     config = AnalysisConfig(
         intent=intent,
@@ -350,6 +363,13 @@ async def stream_message(
         document_context = {"scope": scope, "intent": intent}
         
         try:
+            # SAFETY GATE CHECK
+            if not document_text or len(document_text.strip()) < 50:
+                yield _sse_event("status", "⚠️ No relevant document context found.")
+                yield _sse_event("error", "Please ensure you have uploaded a document and it has been processed.")
+                yield _sse_event("done", "No context available.")
+                return
+
             # 0. SEMANTIC CACHE CHECK
             # We check cache immediately to save compute
             cached_result = await query_cache.get_semantic(message_data.content)

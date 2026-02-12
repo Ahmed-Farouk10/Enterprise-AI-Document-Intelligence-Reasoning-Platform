@@ -30,10 +30,8 @@ async def get_graph_nodes(
              raise HTTPException(status_code=503, detail="Graph engine not initialized")
         
         # We need to implement get_graph_data in cognee_engine or use neo4j_service directly
-        from app.services.neo4j_service import neo4j_service
-        
-        # Execute graph query
-        data = await neo4j_service.get_graph_data(limit=limit, document_id=document_id)
+        # Execute graph query via engine (which handles Neo4j -> Kuzu fallback)
+        data = await cognee_engine.get_graph_data(limit=limit, document_id=document_id)
         
         return {
             "nodes": data.get("nodes", []),
@@ -54,9 +52,8 @@ async def get_graph_edges(
 ):
     """Retrieve edges/relationships from knowledge graph."""
     try:
-        from app.services.neo4j_service import neo4j_service
-        
-        data = await neo4j_service.get_graph_data(limit=limit)
+        # Use engine to handle fallback
+        data = await cognee_engine.get_graph_data(limit=limit)
         return {
             "edges": data.get("edges", []),
             "count": len(data.get("edges", []))
