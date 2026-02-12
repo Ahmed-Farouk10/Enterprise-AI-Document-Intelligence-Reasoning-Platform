@@ -197,11 +197,23 @@ class SessionManager:
         session.metadata["cleared_at"] = datetime.utcnow().isoformat()
         return await self._persist_session(session)
     
+    async def _get_session_data(self, session_id: str) -> Optional[SessionContext]:
+        """Internal retrieve without side effects (no activity update)."""
+        try:
+            data = await self.redis.get(self._session_key(session_id))
+            if data is None:
+                return None
+            return SessionContext.from_dict(data)
+        except Exception as e:
+            logger.error(f"Error reading session data {session_id}: {e}")
+            return None
+
     async def list_user_sessions(self, user_id: str) -> List[Dict[str, Any]]:
         session_ids = await self.redis.smembers(self._user_sessions_key(user_id))
         sessions = []
         for sid in session_ids:
-            session = await self.get_session(sid)
+            # Use lightweight read to avoid updating last_activity on listing
+            session = await self._get_session_data(sid)
             if session:
                 sessions.append({
                     "session_id": session.session_id,

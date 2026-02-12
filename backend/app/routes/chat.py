@@ -309,49 +309,11 @@ async def stream_message(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Configure analysis (MOVED UP)
-    intent = llm.classify_intent(message_data.content)
-    depth = llm.classify_depth(message_data.content)
-    scope = llm.detect_scope(message_data.content)
-    
-    # Get document (Cognee Graph Reasoning)
-    retrieval_data = await _get_retrieved_context(
-        message_data.content, 
-        depth=depth,
-        document_ids=session.document_ids or []
-    )
-    document_text = retrieval_data["full_context"]
-    
-    if not document_text:
-        async def error_stream():
-            yield f"data: {json.dumps({'type': 'error', 'content': 'No relevant document context found'})}\n\n"
-        return StreamingResponse(error_stream(), media_type="text/event-stream")
-    
-    # Save user message (non-blocking)
-    asyncio.create_task(
-        asyncio.to_thread(
-            DatabaseService.create_message,
-            db, session_id, "user", message_data.content
-        )
-    )
-
     # --- SESSION MANAGER INTEGRATION ---
     from app.core.session_manager import session_manager
     
     # Get/Create Session Context
     # We use the session_id from the URL as the consistent ID
-    sm_session = session_manager.get_or_create_session(user_id="default_user", session_id=session_id)
-    history = sm_session.get("context", [])
-    
-    # Save user message to context manager
-    session_manager.update_session_context(
-        session_id=session_id,
-        message={"role": "user", "content": message_data.content},
-        document_ids=session.document_ids
-    )
-
-    # --- SESSION MANAGER INTEGRATION ---
-    # Get/Create Session Context
     sm_session = session_manager.get_or_create_session(user_id="default_user", session_id=session_id)
     history = sm_session.get("context", [])
     

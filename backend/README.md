@@ -25,6 +25,22 @@ Multimodal AI for document understanding using 4 datasets: RVL-CDIP, FUNSD, SROI
 - **Backend**: FastAPI + Docker on Hugging Face Spaces
 - **Training**: Kaggle notebooks → HF Hub models
 - **Frontend**: Vercel (separate)
+- **State Management**: Redis (Conversational Memory & Caching)
+
+## Stateful Architecture (New)
+
+The system uses a persistent memory layer to support stateless deployments (e.g., HF Spaces):
+
+1.  **Session Manager**: backed by Redis, persists user context across server restarts.
+2.  **Semantic Cache**: Caches RAG queries to reduce LLM costs and latency.
+3.  **Conversational Memory**: Maintains short-term and working memory for context-aware chat.
+
+### Requirements
+- **Redis**: A running Redis instance (v5.0+)
+- **Environment Variables**:
+    - `REDIS_HOST`: Hostname (default: localhost)
+    - `REDIS_PORT`: Port (default: 6379)
+    - `REDIS_PASSWORD`: Optional password
 
 ## Datasets
 

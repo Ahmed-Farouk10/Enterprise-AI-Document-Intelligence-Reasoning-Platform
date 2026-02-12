@@ -11,6 +11,10 @@ from app.db.models import Document
 from app.db.service import DatabaseService
 from app.services.retreival import vector_store
 from app.core.rate_limiter import limiter
+from app.core.logging_config import get_logger
+import uuid
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -22,11 +26,6 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 @limiter.limit("10/hour")
 async def upload_document(request: Request, response: Response, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Upload a document and dispatch async processing job"""
-    from app.core.logging_config import get_logger
-    from app.workers.tasks import process_document_task
-    import uuid
-    
-    logger = get_logger(__name__)
     
     # Validate file type
     allowed_types = ["application/pdf", "text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
@@ -73,33 +72,11 @@ async def upload_document(request: Request, response: Response, file: UploadFile
         # FORCED INLINE PROCESSING (Celery worker not available in HF Spaces)
         logger.info(f"📄 Processing document inline: {file.filename}")
         
-        # Extract text based on file type
-        text = ""
+        # Extract text using OCR Service
         try:
-            if file.content_type == "text/plain":
-                with open(file_path, "r", encoding="utf-8") as f:
-                    text = f.read()
-                logger.info(f"📝 Extracted {len(text)} chars from TXT")
-            elif file.content_type == "application/pdf":
-                try:
-                    import pdfplumber
-                    with pdfplumber.open(file_path) as pdf:
-                        text = "\n\n".join([page.extract_text() or "" for page in pdf.pages])
-                    logger.info(f"📝 Extracted {len(text)} chars from PDF via pdfplumber")
-                except Exception as plumber_error:
-                    logger.warning(f"⚠️ pdfplumber failed: {plumber_error}. Falling back to pypdf.")
-                    text = "" # Reset
-                    
-                # Fallback to pypdf if plumber failed or returned empty text
-                if not text or len(text.strip()) < 50:
-                    try:
-                        import pypdf
-                        reader = pypdf.PdfReader(file_path)
-                        text = "\n\n".join([page.extract_text() or "" for page in reader.pages])
-                        logger.info(f"📝 Extracted {len(text)} chars from PDF via pypdf (Fallback)")
-                    except Exception as pypdf_error:
-                        logger.error(f"❌ pypdf fallback also failed: {pypdf_error}")
-                        # If both fail, let text be empty and handled below
+            from app.services.ocr import ocr_service
+            text = ocr_service.extract_text(file_path, file.content_type)
+            
         except Exception as extraction_error:
             logger.error(f"❌ Text extraction failed: {extraction_error}", exc_info=True)
             document.status = "failed"

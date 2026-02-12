@@ -215,6 +215,43 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         self._ensure_loaded()
         logger.info("LLM Service warmed up and ready")
     
+    # ==================== CIRCUIT BREAKER ====================
+    
+    _failure_count: int = 0
+    _last_failure_time: float = 0
+    _circuit_open: bool = False
+    CB_THRESHOLD: int = 5
+    CB_RESET_TIMEOUT: int = 60  # seconds
+
+    def _check_circuit(self):
+        """Check if circuit is open and if it should reset."""
+        import time
+        if self._circuit_open:
+            if time.time() - self._last_failure_time > self.CB_RESET_TIMEOUT:
+                logger.info("🔄 Circuit Breaker HALF-OPEN: Testing service...")
+                self._circuit_open = False
+                self._failure_count = 0
+                return
+            raise Exception("Circuit Breaker OPEN: Service unavailable due to repeated failures.")
+
+    def _record_failure(self):
+        """Record a failure and potentially open circuit."""
+        import time
+        self._failure_count += 1
+        self._last_failure_time = time.time()
+        logger.warning(f"⚠️ LLM Service Failure ({self._failure_count}/{self.CB_THRESHOLD})")
+        
+        if self._failure_count >= self.CB_THRESHOLD:
+            self._circuit_open = True
+            logger.error("🔥 Circuit Breaker TRIPPED: Stopping requests for 60s")
+
+    def _record_success(self):
+        """Reset failure count on success."""
+        if self._failure_count > 0:
+            self._failure_count = 0
+            self._circuit_open = False
+            logger.info("✅ Circuit Breaker RESET: Service healthy")
+
     def _generate_via_inference_api(
         self,
         prompt: Any,
@@ -223,9 +260,10 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         top_p: float = 0.9
     ) -> str:
         """
-        Generate using HuggingFace Inference API (for HF Spaces deployment).
-        Uses chat_completion (conversational task) for better compatibility.
+        Generate using HuggingFace Inference API with Circuit Breaker.
         """
+        self._check_circuit()
+        
         try:
             from huggingface_hub import InferenceClient
             
@@ -246,9 +284,11 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                 top_p=top_p
             )
             
+            self._record_success()
             return response.choices[0].message.content
             
         except Exception as e:
+            self._record_failure()
             error_msg = str(e)
             logger.error(f"HF Inference API failed: {error_msg}")
             
@@ -258,8 +298,11 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                     "Alternatively, enable 'Make calls to the serverless Inference API'."
                 )
                 return f"I apologize, but I'm unable to authenticate with the Inference API. {advice}"
+            
+            # If circuit tripped, re-raise to stop immediate retries higher up
+            if self._circuit_open:
+                return "⚠️ System Alert: LLM Service is temporarily unavailable. Please try again in a minute."
                 
-            # Graceful degradation
             return "I apologize, but I'm currently unable to process this request due to system limitations. Please try again later."
 
     # ==================== INTENT & SCOPE CLASSIFICATION ====================

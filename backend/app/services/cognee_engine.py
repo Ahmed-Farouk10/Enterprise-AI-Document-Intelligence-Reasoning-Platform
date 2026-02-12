@@ -785,26 +785,6 @@ class CogneeEngine:
                 
         except Exception as e:
             logger.error(f"Failed to get graph data: {e}", exc_info=True)
-            return {"nodes": [], "edges": []}                            graph_edges.append({
-                                "source": f"node_{idx-1}",
-                                "target": node_id,
-                                "label": "related_to",
-                                "properties": {}
-                            })
-                
-                logger.info(f"Retrieved {len(graph_nodes)} nodes, {len(graph_edges)} edges from Cognee search")
-                return {"nodes": graph_nodes, "edges": graph_edges}
-                
-            except Exception as search_error:
-                logger.warning(f"Cognee search API unavailable: {search_error}")
-                # Return empty graph with helpful message
-                return {
-                    "nodes": [],
-                    "edges": []
-                }
-                
-        except Exception as e:
-            logger.error(f"Failed to get graph data: {e}", exc_info=True)
             return {"nodes": [], "edges": []}
 
 

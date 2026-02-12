@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Enterprise Document Intelligence API - Enhanced Self-RAG",
-    version="0.4.0",
+    version="0.4.1",
     description="Multi-document AI with Self-RAG: Citations, Query Rewriting, Hallucination Detection + Async Processing",
     lifespan=lifespan
 )
