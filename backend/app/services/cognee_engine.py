@@ -335,8 +335,7 @@ class CogneeEngine:
             logger.info(f"Adding document {document_id} to Cognee dataset: {dataset_name}")
             # Extract filename from metadata if provided (for logging only)
             filename = metadata.get("filename", "unknown") if metadata else "unknown"
-            
-            try:
+            try:  # Cognee ingestion with timeout
                 # Cognee 0.5.2 add() linked to user for auditing
                 # Add aggressive timeout (increased for HF Spaces)
                 await asyncio.wait_for(
@@ -367,8 +366,17 @@ class CogneeEngine:
                     timeout=300.0  # Increased from 90s
                 )
                 logger.info(f"✅ Knowledge graph built successfully for {dataset_name}")
+                
+                # 3. Memory Enrichment (memify) - Derives new facts and relationships
+                logger.info(f"🧠 Enriching memory graph (memify) for {dataset_name}...")
+                await cognee.memify(
+                    datasets=[dataset_name],
+                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                )
+                logger.info(f"✅ Memory enrichment complete for {dataset_name}")
+                
             except asyncio.TimeoutError:
-                logger.error(f"⏱️ Cognee graph building timed out after 300s for {dataset_name}")
+                logger.error(f"⏱️ Cognee graph building/enrichure timed out after 300s for {dataset_name}")
                 raise RuntimeError("Cognee graph building timed out - document may be too large or LLM is slow")
             
             # Get graph statistics from Neo4j
@@ -409,34 +417,40 @@ class CogneeEngine:
         return "generic"
     
     async def _get_graph_stats_from_neo4j(self, document_id: str) -> Dict:
-        """Extract statistics from Neo4j knowledge graph for a specific document"""
+        """Extract statistics from Knowledge Graph (Kuzu/Neo4j)"""
         try:
+            # Check if Neo4j is available
             from app.services.neo4j_service import neo4j_service
-            
-            # Get overall graph statistics
-            overall_stats = await neo4j_service.get_graph_statistics()
-            
-            # TODO: Filter by document_id when we add document tracking to nodes
-            # For now, return overall stats
-            # In production, you'd query: MATCH (d:Document {id: $doc_id})-[*]-(n) RETURN count(n)
-            
-            return {
-                "entity_count": overall_stats.get("entity_count", 0),
-                "relationship_count": overall_stats.get("relationship_count", 0),
-                "temporal_facts": [],  # Extract from graph if temporal data exists
-                "document_id": document_id
-            }
+            if neo4j_service._available:
+                # Get overall graph statistics
+                overall_stats = await neo4j_service.get_graph_statistics()
+                
+                return {
+                    "entity_count": overall_stats.get("entity_count", 0),
+                    "relationship_count": overall_stats.get("relationship_count", 0),
+                    "temporal_facts": [],
+                    "document_id": document_id
+                }
+            else:
+                # Fallback for Kuzu/Local (Counting not easily efficient in raw Kuzu without traversal)
+                # We return placeholder stats to indicate graph is active but uncounted
+                return {
+                    "entity_count": -1, # Indicates active but uncounted
+                    "relationship_count": -1,
+                    "temporal_facts": [],
+                    "document_id": document_id,
+                    "status": "Active (Local Graph)"
+                }
             
         except Exception as e:
-            logger.error(f"Failed to get graph stats from Neo4j: {e}")
-            # Return zeros on error
+            logger.error(f"Failed to get graph stats: {e}")
             return {
                 "entity_count": 0,
                 "relationship_count": 0,
                 "temporal_facts": [],
                 "document_id": document_id
             }
-    
+
     # ==================== QUERY & REASONING ====================
 
     async def search_documents(self, query_text: str, limit: int = 50):
@@ -467,12 +481,27 @@ class CogneeEngine:
         Execute Cognee graph query with reasoning using real Cognee search.
         """
         try:
+            # Map AnalysisMode to Cognee SearchType
+            search_type = SearchType.GRAPH_COMPLETION # Default: Conversational + Reasoning
+            
+            if mode == AnalysisMode.TEMPORAL_REASONING:
+                # Insights highlights relationships/connections which is good for temporal flows
+                search_type = SearchType.INSIGHTS 
+            elif mode == AnalysisMode.ENTITY_EXTRACTION:
+                # Summaries provides a high-level view (modified from CHUNKS to reduce noise)
+                search_type = SearchType.SUMMARIES
+            elif mode == AnalysisMode.RELATIONSHIP_MAPPING:
+                search_type = SearchType.INSIGHTS
+            
             # Execute graph search via Cognee
-            logger.info(f"Querying Cognee graph: {question}")
+            logger.info(f"Querying Cognee graph: {question} (Type: {search_type})")
+            
             # Note: Cognee 0.5.2 search() expects query_text and user
             search_results = await cognee.search(
                 query_text=question,
-                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                query_type=search_type, # Use specific search type
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)),
+                save_interaction=True # Enable feedback loop (store query/result)
             )
             
             # Extract entities from search results
@@ -622,13 +651,18 @@ class CogneeEngine:
         try:
             from app.services.neo4j_service import neo4j_service
             
-            # Get limited graph data for visualization
-            graph_data = await neo4j_service.get_graph_data(limit=20)
-            
-            return {
-                "nodes": graph_data.get("nodes", []),
-                "links": graph_data.get("edges", [])
-            }
+            if neo4j_service._available:
+                # Get limited graph data for visualization
+                graph_data = await neo4j_service.get_graph_data(limit=20)
+                return {
+                    "nodes": graph_data.get("nodes", []),
+                    "links": graph_data.get("edges", [])
+                }
+            else:
+                # Fallback for Kuzu: Return empty subgraph for now
+                # Or wait for new /visualize endpoint to be used by frontend
+                return {"nodes": [], "links": []}
+
         except Exception as e:
             logger.error(f"Failed to extract subgraph: {e}")
             return {"nodes": [], "links": []}
