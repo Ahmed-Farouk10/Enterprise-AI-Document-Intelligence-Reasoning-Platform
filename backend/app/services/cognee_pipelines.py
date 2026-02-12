@@ -39,6 +39,16 @@ from app.models.cognee_models import (
 
 logger = logging.getLogger(__name__)
 
+# Import required for user UUID generation in fallbacks
+import uuid
+from app.core.cognee_config import settings as cognee_settings
+try:
+    from cognee.modules.users.models import User
+except ImportError:
+    class User:
+        def __init__(self, id):
+            self.id = id
+
 
 # ==================== EXTRACTION TASKS ====================
 
@@ -343,10 +353,14 @@ async def process_resume_document(
         try:
             # Manually push to Cognee memory
             # Note: add_data_points typically expects list of datapoints and dataset name
-            await add_data_points([resume], dataset_name)
+            await add_data_points(
+                data=[resume], 
+                dataset_name=dataset_name,
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+            )
             
             # Cognify specifically for this dataset if needed, but adding points usually enough for graph
-            # await cognee.cognify(datasets=[dataset_name]) 
+            # await cognee.cognify(datasets=[dataset_name], user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))) 
             
             logger.info(f"✅ Data points stored successfully")
         except Exception as storage_error:
@@ -541,7 +555,11 @@ async def professional_ingestion_workflow(text: str, document_id: str):
         except Exception as e:
             logger.error(f"Manual vector storage failed: {e}")
             # Fallback to standard add if manual fails (risky but better than crash)
-            await cognee.add(text, dataset_name=f"doc_{document_id}")
+            await cognee.add(
+                data=text, 
+                dataset_name=f"doc_{document_id}",
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+            )
             
         return {"status": "completed", "document_id": document_id}
         
