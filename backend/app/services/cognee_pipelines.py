@@ -399,7 +399,7 @@ async def extract_education_entities(text: str) -> 'CourseMaterial':
 
 # ==================== CUSTOM PIPELINES (EXPANDED) ====================
 
-async def process_resume_document(text: str, document_id: str, document_type: str = "resume", timeout_seconds: int = 60) -> Any:
+async def process_resume_document(text: str, document_id: str, document_type: str = "resume", timeout_seconds: int = 120) -> Any:
     """Direct Resume Processing Pipeline"""
     if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
     logger.info(f"🚀 Starting RESUME pipeline for {document_id}")
@@ -461,85 +461,7 @@ async def _store_and_cognify(data_points: List[Any], dataset_name: str):
 async def process_generic_document(text: str, document_id: str, document_type: str = "document") -> Dict[str, Any]:
     """Generic fall-back pipeline"""
     if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
-    logger.info(f"📄 Processing GENERIC document {document_id}")Cache get error for key session:4d290bf7-0b20-4c41-824d-245f27daeec4: AbstractConnection.__init__() got an unexpected keyword argument 'ssl'
-
-Session 4d290bf7-0b20-4c41-824d-245f27daeec4 not found or expired
-
-Cache set error for key session:2ca38c52-cc2f-4d47-865a-2df183c28d99: AbstractConnection.__init__() got an unexpected keyword argument 'ssl'
-
-Set add error: AbstractConnection.__init__() got an unexpected keyword argument 'ssl'
-
-Created session 2ca38c52-cc2f-4d47-865a-2df183c28d99 for user default_user
-ERROR:    Exception in ASGI application
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py", line 416, in run_asgi
-    result = await app(  # type: ignore[func-returns-value]
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
-    return await self.app(scope, receive, send)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.11/site-packages/fastapi/applications.py", line 1134, in __call__
-    await super().__call__(scope, receive, send)
-  File "/usr/local/lib/python3.11/site-packages/starlette/applications.py", line 107, in __call__
-    await self.middleware_stack(scope, receive, send)
-  File "/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py", line 186, in __call__
-    raise exc
-  File "/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
-    await self.app(scope, receive, _send)
-  File "/usr/local/lib/python3.11/site-packages/starlette/middleware/cors.py", line 95, in __call__
-    await self.simple_response(scope, receive, send, request_headers=headers)
-  File "/usr/local/lib/python3.11/site-packages/starlette/middleware/cors.py", line 153, in simple_response
-    await self.app(scope, receive, send)
-  File "/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py", line 191, in __call__
-    with recv_stream, send_stream, collapse_excgroups():
-  File "/usr/local/lib/python3.11/contextlib.py", line 158, in __exit__
-    self.gen.throw(typ, value, traceback)
-  File "/usr/local/lib/python3.11/site-packages/starlette/_utils.py", line 87, in collapse_excgroups
-    raise exc
-  File "/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py", line 193, in __call__
-    response = await self.dispatch_func(request, call_next)
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/app/main.py", line 100, in session_middleware
-    response = await call_next(request)
-               ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py", line 168, in call_next
-    raise app_exc from app_exc.__cause__ or app_exc.__context__
-  File "/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py", line 144, in coro
-    await self.app(scope, receive_or_disconnect, send_no_error)
-  File "/usr/local/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
-    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
-  File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-    raise exc
-  File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-    await app(scope, receive, sender)
-  File "/usr/local/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
-    await self.app(scope, receive, send)
-  File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 716, in __call__
-    await self.middleware_stack(scope, receive, send)
-  File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 736, in app
-    await route.handle(scope, receive, send)
-  File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 290, in handle
-    await self.app(scope, receive, send)
-  File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 119, in app
-    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
-  File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-    raise exc
-  File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-    await app(scope, receive, sender)
-  File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 105, in app
-    response = await f(request)
-               ^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 424, in app
-    raw_response = await run_endpoint_function(
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 312, in run_endpoint_function
-    return await dependant.call(**values)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/app/routes/chat.py", line 318, in stream_message
-    history = sm_session.get("context", [])
-              ^^^^^^^^^^^^^^
-AttributeError: 'SessionContext' object has no attribute 'get'
-INFO:     10.16.6.60:20417 - "GET /api/chat/sessions HTTP/1.1" 200 OK
+    logger.info(f"📄 Processing GENERIC document {document_id}")
     try:
         await professional_ingestion_workflow(text, document_id)
         return {"success": True, "dataset": f"doc_{document_id}", "type": "generic"}
@@ -588,8 +510,8 @@ async def professional_ingestion_workflow(text: str, document_id: str):
     try:
         dataset_name = f"doc_{document_id}"
         user_uuid = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
-        await asyncio.wait_for(cognee.add(data=text, dataset_name=dataset_name, user=User(id=user_uuid)), timeout=30.0)
-        await asyncio.wait_for(cognee.cognify(datasets=[dataset_name], user=User(id=user_uuid)), timeout=90.0)
+        await asyncio.wait_for(cognee.add(data=text, dataset_name=dataset_name, user=User(id=user_uuid)), timeout=120.0)
+        await asyncio.wait_for(cognee.cognify(datasets=[dataset_name], user=User(id=user_uuid)), timeout=300.0)
         logger.info(f"✅ Generic document ingested: {dataset_name}")
         return {"status": "completed", "document_id": document_id}
     except Exception as e:

@@ -336,20 +336,20 @@ class CogneeEngine:
             # Extract filename from metadata if provided (for logging only)
             filename = metadata.get("filename", "unknown") if metadata else "unknown"
             
-            try:
+                try:
                 # Cognee 0.5.2 add() linked to user for auditing
-                # Add aggressive timeout
+                # Add aggressive timeout (increased for HF Spaces)
                 await asyncio.wait_for(
                     cognee.add(
                         data=document_text,
                         dataset_name=dataset_name,
                         user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
                     ),
-                    timeout=30.0
+                    timeout=120.0  # Increased from 30s
                 )
                 logger.info(f"✅ Document added to Cognee dataset: {dataset_name}")
             except asyncio.TimeoutError:
-                logger.error(f"⏱️ Cognee add() timed out after 30s for {dataset_name}")
+                logger.error(f"⏱️ Cognee add() timed out after 120s for {dataset_name}")
                 raise RuntimeError(f"Cognee add() operation timed out - may be downloading models or waiting for external service")
             except Exception as add_error:
                 logger.error(f"❌ Cognee add() failed: {add_error}")
@@ -358,17 +358,17 @@ class CogneeEngine:
             # Build knowledge graph with timeout
             logger.info(f"🔨 Building knowledge graph for {dataset_name}...")
             try:
-                # Set a reasonable timeout for graph building
+                # Set a reasonable timeout for graph building (increased for HF Spaces)
                 await asyncio.wait_for(
                     cognee.cognify(
                         datasets=[dataset_name],
                         user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
                     ),
-                    timeout=90.0
+                    timeout=300.0  # Increased from 90s
                 )
                 logger.info(f"✅ Knowledge graph built successfully for {dataset_name}")
             except asyncio.TimeoutError:
-                logger.error(f"⏱️ Cognee graph building timed out after 90s for {dataset_name}")
+                logger.error(f"⏱️ Cognee graph building timed out after 300s for {dataset_name}")
                 raise RuntimeError("Cognee graph building timed out - document may be too large or LLM is slow")
             
             # Get graph statistics from Neo4j

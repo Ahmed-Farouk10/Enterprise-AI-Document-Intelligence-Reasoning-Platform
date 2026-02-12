@@ -318,11 +318,17 @@ async def stream_message(
     history = sm_session.messages if sm_session else []
     
     # Save user message to context manager
-    session_manager.update_session_context(
+    await session_manager.update_session_context(
         session_id=session_id,
         message={"role": "user", "content": message_data.content},
         document_ids=session.document_ids
     )
+
+    # Initialize analysis parameters (defaults)
+    # These should ideally come from the request, but for now we default them to prevent crashes
+    intent = "general_analysis"
+    depth = "comprehensive"
+    scope = "document"
 
     config = AnalysisConfig(
         intent=intent,
