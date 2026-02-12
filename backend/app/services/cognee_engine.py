@@ -462,7 +462,6 @@ class CogneeEngine:
             # Use 'query_text' as parameter name (Cognee 0.5.x)
             results = await cognee.search(
                 query_text=query_text, 
-                limit=limit,
                 user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
             )
             return results
@@ -823,8 +822,7 @@ class CogneeEngine:
                     search_results = await cognee.search(
                         query_text="*", 
                         query_type=SearchType.INSIGHTS,
-                        user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)),
-                        limit=limit
+                        user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
                     )
                 except Exception as kuzu_e:
                     logger.warning(f"Kuzu extraction failed with INSIGHTS: {kuzu_e}. Retrying with GRAPH_COMPLETION.")
@@ -832,8 +830,7 @@ class CogneeEngine:
                     search_results = await cognee.search(
                         query_text="*", 
                         query_type=SearchType.GRAPH_COMPLETION,
-                        user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)),
-                        limit=limit
+                        user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
                     )
                 
                 nodes = []

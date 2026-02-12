@@ -653,11 +653,12 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         # Fallback to Inference API if model not loaded
         if self.model is None:
             logger.info("Using HuggingFace Inference API for streaming")
-            return self._generate_via_inference_api_stream(
+            yield from self._generate_via_inference_api_stream(
                 prompt=messages,
                 max_tokens=max_new_tokens,
                 temperature=temperature
             )
+            return
         
         # Local generation (original logic)
         text = self.tokenizer.apply_chat_template(
