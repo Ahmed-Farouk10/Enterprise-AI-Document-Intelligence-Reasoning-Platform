@@ -91,16 +91,14 @@ def configure_cognee_paths():
     os.environ["COGNEE_VECTOR_DB"] = "lancedb"
     
     # CRITICAL: Force 384 dimensions for local all-MiniLM-L6-v2
-    # This prevents Cognee from defaulting to 3072 (OpenAI) and crashing on storage
-    # CRITICAL: Force 3072 dimensions for Cognee compatibility
-    # Our local model is 384, but we pad to 3072 in embeddings.py.
-    # Cognee's internal validator often defaults to 3072 and ignores overrides if they don't match his internal adapter expectation.
-    os.environ["EMBEDDING_DIMENSION"] = "3072"
-    os.environ["VECTOR_DB_DIMENSION"] = "3072"
-    os.environ["COGNEE_VECTOR_DIMENSION"] = "3072"
-    os.environ["COGNEE_DIMENSION"] = "3072"
-    os.environ["EMBEDDING_SIZE"] = "3072"
-    os.environ["VECTOR_SIZE"] = "3072"
+    # This aligns Cognee configuration with the actual model output
+    # Removing the 3072 padding hack allows native vector processing
+    os.environ["EMBEDDING_DIMENSION"] = "384"
+    os.environ["VECTOR_DB_DIMENSION"] = "384"
+    os.environ["COGNEE_VECTOR_DIMENSION"] = "384"
+    os.environ["COGNEE_DIMENSION"] = "384"
+    os.environ["EMBEDDING_SIZE"] = "384"
+    os.environ["VECTOR_SIZE"] = "384"
     
     print(f"📦 Model cache directory: {models_dir}")
     

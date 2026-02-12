@@ -30,7 +30,7 @@ class SentenceTransformerEmbeddingEngine:
         import asyncio
         try:
             if not text:
-                return self._pad_vector([0.0] * self.dimension)
+                return [0.0] * self.dimension
                 
             if isinstance(text, list):
                 # Batch processing
@@ -39,7 +39,7 @@ class SentenceTransformerEmbeddingEngine:
                     text, 
                     convert_to_numpy=True
                 )
-                return [self._pad_vector(v.tolist()) for v in embeddings]
+                return [v.tolist() for v in embeddings]
             
             # Single processing
             embedding = await asyncio.to_thread(
@@ -47,26 +47,20 @@ class SentenceTransformerEmbeddingEngine:
                 text, 
                 convert_to_numpy=True
             )
-            return self._pad_vector(embedding.tolist())
+            return embedding.tolist()
         except Exception as e:
             logger.error(f"Embedding failed: {e}")
             if isinstance(text, list):
-                return [self._pad_vector([0.0] * self.dimension) for _ in text]
-            return self._pad_vector([0.0] * self.dimension)
-
-    def _pad_vector(self, vector: List[float]) -> List[float]:
-        """Pad vector to 3072 dimensions for Cognee compatibility."""
-        if len(vector) < 3072:
-            return vector + [0.0] * (3072 - len(vector))
-        return vector[:3072]
+                return [[0.0] * self.dimension for _ in text]
+            return [0.0] * self.dimension
 
     # Shim for older Cognee versions or sync contexts if needed
     def embed_text_sync(self, text: Any) -> Any:
         if isinstance(text, list):
             embeddings = self.model.encode(text, convert_to_numpy=True)
-            return [self._pad_vector(v.tolist()) for v in embeddings]
-        return self._pad_vector(self.model.encode(text, convert_to_numpy=True).tolist())
+            return [v.tolist() for v in embeddings]
+        return self.model.encode(text, convert_to_numpy=True).tolist()
 
     def get_vector_size(self) -> int:
-        """Return embedding dimension (always 3072 for system-wide alignment)"""
-        return 3072
+        """Return embedding dimension (384 for all-MiniLM-L6-v2)"""
+        return 384
