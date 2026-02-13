@@ -78,10 +78,16 @@ async def lifespan(app: FastAPI):
             logger.error("application_startup", status="cognee_initialization_failed", error=str(e))
     
     asyncio.create_task(init_cognee())
+
+    # Start Memify Background Service (Self-Improvement)
+    from app.services.cognee_background import memify_service
+    await memify_service.start()
+    logger.info("application_startup", status="memify_service_started")
     
     yield
     
     # Shutdown
+    await memify_service.stop()
     await redis_adapter.disconnect()
     logger.info("application_shutdown", status="redis_disconnected")
 

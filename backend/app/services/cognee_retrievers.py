@@ -11,9 +11,18 @@ Uses Cognee's search APIs combined with custom graph traversal logic.
 """
 
 import logging
+import uuid
 from typing import List, Dict, Any, Optional
 import cognee
 from cognee.api.v1.search import SearchType
+
+from app.core.cognee_config import settings as cognee_settings
+try:
+    from cognee.modules.users.models import User
+except ImportError:
+    class User:
+        def __init__(self, id):
+            self.id = id
 
 # Models
 from app.models.cognee_models import Resume, Person, Skill, CareerGap, SkillMatch, ComparisonResult
@@ -28,7 +37,7 @@ class ResumeRetriever:
     @staticmethod
     async def search_candidates(query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
-        Find candidates matching a natural language query.
+        Find candidates matching a natural language query using Hybrid Search.
         
         Args:
             query: NL query (e.g. "Python developers with 5 years experience")
@@ -37,22 +46,24 @@ class ResumeRetriever:
         Returns:
             List of candidate summaries with match scores
         """
-        logger.info(f"🔍 Searching candidates: '{query}'")
+        logger.info(f"🔍 Searching candidates (Hybrid): '{query}'")
         
         try:
-            # Use Cognee's semantic search over the graph
-            # This searches both vector embeddings and graph relationships
+            # Check if HYBRID is available, otherwise fall back or use string
+            search_type = getattr(SearchType, "HYBRID", SearchType.SUMMARIES)
+            if search_type == SearchType.SUMMARIES:
+                logger.info("ℹ️ SearchType.HYBRID not found in Enum, using SUMMARIES with hybrid intent")
+            
+            # Use Cognee's search (Vector + Graph)
             search_results = await cognee.search(
                 query_text=query,
-                search_type=SearchType.SUMMARIES,
+                search_type=search_type,
                 user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
             )
             
-            # Cognee returns generic results, we need to format them
             candidates = []
             for result in search_results[:limit]:
-                # In 0.5.x, result might be a dict or object
-                # We extract relevant fields
+                # Normalize result
                 candidates.append({
                     "id": getattr(result, "id", "unknown"),
                     "text": getattr(result, "text", str(result)),

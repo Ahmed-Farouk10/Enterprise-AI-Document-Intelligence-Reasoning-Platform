@@ -40,6 +40,127 @@ except ImportError:
             self.id = id
 
 
+# ==================== ECL ARCHITECTURE (Extract-Cognify-Load) ====================
+
+class PipelineConfig(BaseModel):
+    """Configuration for the ECL pipeline behavior"""
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+    chunking_strategy: str = "semantic"
+    graph_model: str = "default"
+    include_original_text: bool = True
+    cognify_timeout: float = 600.0
+
+class ECLProcessor:
+    """
+    Standardized Extract-Cognify-Load Processor.
+    
+    Implements the professional pipeline pattern:
+    1. EXTRACT: Parse document and extract entities via LLM
+    2. LOAD: Store raw text (for vector search) and structured data (for graph)
+    3. COGNIFY: Trigger knowledge graph construction
+    """
+    
+    def __init__(self, config: Optional[PipelineConfig] = None):
+        self.config = config or PipelineConfig()
+        
+    async def process(
+        self, 
+        doc_id: str, 
+        text_content: str, 
+        metadata: Dict[str, Any],
+        extraction_task: Any = None,
+        dataset_name_prefix: str = "doc"
+    ) -> Dict[str, Any]:
+        """
+        Execute the full ECL pipeline.
+        
+        Args:
+            doc_id: Unique document identifier
+            text_content: Raw text content
+            metadata: Metadata dictionary (source, timestamp, etc.)
+            extraction_task: Optional coroutine for structured extraction
+            dataset_name: Prefix for the dataset name
+            
+        Returns:
+            Dict containing processing status and extracted data
+        """
+        if not COGNEE_AVAILABLE:
+            raise RuntimeError("Cognee not available")
+
+        # Create localized dataset name
+        dataset_name = f"{dataset_name_prefix}_{doc_id}"
+        user_uuid = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
+        user = User(id=user_uuid)
+        
+        logger.info(f"🚀 Starting ECL Pipeline for {dataset_name} (Type: {dataset_name_prefix})")
+        
+        try:
+            # STEP 1: LOAD (Raw Text) - Indexed for vector search
+            if self.config.include_original_text:
+                logger.info(f"💾 [LOAD] Indexing raw text for hybrid search...")
+                # In a real implementation: chunk content first? Cognee handles this if we pass text.
+                await cognee.add(
+                    data=text_content,
+                    dataset_name=dataset_name,
+                    user=user
+                )
+
+            structured_data = None
+            if extraction_task:
+                # STEP 2: EXTRACT (Structured Entity Extraction)
+                logger.info(f"🔍 [EXTRACT] extracting structured entities...")
+                
+                # Await if it's a coroutine (async task)
+                if asyncio.iscoroutine(extraction_task):
+                    structured_data = await extraction_task
+                else:
+                    structured_data = extraction_task
+                
+                # STEP 3: LOAD (Structured Data) - Graph Nodes
+                if structured_data:
+                    logger.info(f"💾 [LOAD] storing {type(structured_data).__name__} entities...")
+                    # Normalize to list
+                    data_payload = structured_data if isinstance(structured_data, list) else [structured_data]
+                    await cognee.add(
+                        data=data_payload,
+                        dataset_name=dataset_name,
+                        user=user
+                    )
+
+            # STEP 4: COGNIFY (Graph Construction)
+            logger.info(f"🧠 [COGNIFY] Building Knowledge Graph...")
+            try:
+                # Use extended timeout for specific environments
+                await asyncio.wait_for(
+                    cognee.cognify(datasets=[dataset_name], user=user), 
+                    timeout=self.config.cognify_timeout
+                )
+                logger.info(f"✅ ECL Pipeline success: Values persisted to Graph & Vector Store")
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ Cognify timed out after {self.config.cognify_timeout}s. Data is saved but graph relationships may be incomplete.")
+            
+            # STEP 5: SELF-IMPROVEMENT (Memify Registration)
+            try:
+                from app.services.cognee_background import memify_service
+                memify_service.register_dataset(dataset_name)
+                logger.info(f"🧠 Registered {dataset_name} for Memify maintenance")
+            except ImportError:
+                pass
+
+            return {
+                "status": "completed",
+                "dataset": dataset_name,
+                "data": structured_data
+            }
+
+        except Exception as e:
+            logger.error(f"❌ ECL Pipeline failed for {doc_id}: {e}", exc_info=True)
+            raise
+
+# Global default processor
+default_ecl = ECLProcessor()
+
 # ==================== EXTRACTION TASKS ====================
 
 async def extract_resume_entities(text: str) -> Resume:
@@ -402,12 +523,17 @@ async def extract_education_entities(text: str) -> 'CourseMaterial':
 async def process_resume_document(text: str, document_id: str, document_type: str = "resume", timeout_seconds: int = 120) -> Any:
     """Direct Resume Processing Pipeline"""
     if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
-    logger.info(f"🚀 Starting RESUME pipeline for {document_id}")
+    
     try:
-        resume = await asyncio.wait_for(extract_resume_entities(text), timeout=timeout_seconds)
-        dataset_name = f"resume_{document_id}"
-        await _store_and_cognify([resume], dataset_name, original_text=text)
-        return resume
+        # Use ECL Processor
+        result = await default_ecl.process(
+            doc_id=document_id,
+            text_content=text,
+            metadata={"type": "resume"},
+            extraction_task=extract_resume_entities(text),
+            dataset_name_prefix="resume"
+        )
+        return result["data"]
     except Exception as e:
         logger.error(f"Resume pipeline failed: {e}")
         from app.models.cognee_models import Resume, Person
@@ -415,73 +541,50 @@ async def process_resume_document(text: str, document_id: str, document_type: st
 
 async def process_legal_document(text: str, document_id: str) -> Any:
     """Direct Legal Processing Pipeline"""
-    logger.info(f"🚀 Starting LEGAL pipeline for {document_id}")
     try:
-        contract = await extract_legal_entities(text)
-        dataset_name = f"contract_{document_id}"
-        await _store_and_cognify([contract], dataset_name, original_text=text)
-        return contract
+        result = await default_ecl.process(
+            doc_id=document_id,
+            text_content=text,
+            metadata={"type": "contract"},
+            extraction_task=extract_legal_entities(text),
+            dataset_name_prefix="contract"
+        )
+        return result["data"]
     except Exception as e:
         logger.error(f"Legal pipeline failed: {e}")
         return {"error": str(e)}
 
 async def process_financial_document(text: str, document_id: str) -> Any:
     """Direct Financial Processing Pipeline"""
-    logger.info(f"🚀 Starting FINANCIAL pipeline for {document_id}")
     try:
-        invoice = await extract_financial_entities(text)
-        dataset_name = f"invoice_{document_id}"
-        await _store_and_cognify([invoice], dataset_name, original_text=text)
-        return invoice
+        result = await default_ecl.process(
+            doc_id=document_id,
+            text_content=text,
+            metadata={"type": "invoice"},
+            extraction_task=extract_financial_entities(text),
+            dataset_name_prefix="invoice"
+        )
+        return result["data"]
     except Exception as e:
         logger.error(f"Financial pipeline failed: {e}")
         return {"error": str(e)}
 
 async def process_education_document(text: str, document_id: str) -> Any:
     """Direct Education Processing Pipeline"""
-    logger.info(f"🚀 Starting EDUCATION pipeline for {document_id}")
     try:
-        course = await extract_education_entities(text)
-        dataset_name = f"course_{document_id}"
-        await _store_and_cognify([course], dataset_name, original_text=text)
-        return course
+        result = await default_ecl.process(
+            doc_id=document_id,
+            text_content=text,
+            metadata={"type": "education"},
+            extraction_task=extract_education_entities(text),
+            dataset_name_prefix="course"
+        )
+        return result["data"]
     except Exception as e:
         logger.error(f"Education pipeline failed: {e}")
         return {"error": str(e)}
 
-async def _store_and_cognify(data_points: List[Any], dataset_name: str, original_text: str = None):
-    """Helper to store data and trigger Cognify"""
-    try:
-        user_uuid = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
-        user = User(id=user_uuid)
-        
-        # CRITICAL: Always add the raw text first to ensure vector index is created
-        # This fixes "TextSummary_text collection not found" error
-        if original_text:
-            logger.info(f"📝 Adding raw text to ensure vector indexing (dataset: {dataset_name})")
-            await cognee.add(
-                data=original_text,
-                dataset_name=dataset_name,
-                user=user
-            )
 
-        logger.info(f"📤 Adding {len(data_points)} structured data points to Cognee (dataset: {dataset_name})")
-        await cognee.add(
-            data=data_points,
-            dataset_name=dataset_name, 
-            user=user
-        )
-        
-        logger.info(f"🔨 Building knowledge graph via Cognify (dataset: {dataset_name})...")
-        # Increase timeout for complex graph operations on CPU
-        try:
-            await asyncio.wait_for(cognee.cognify(datasets=[dataset_name], user=user), timeout=600.0)
-            logger.info(f"✅ Data stored & cognified successfully for {dataset_name}")
-        except asyncio.TimeoutError:
-            logger.warning(f"⏱️ Cognify timed out for {dataset_name}, but data was added. Search may be ready.")
-            
-    except Exception as e:
-        logger.error(f"❌ Storage/Cognify failed for {dataset_name}: {e}", exc_info=True)
 
 async def process_generic_document(text: str, document_id: str, document_type: str = "document") -> Dict[str, Any]:
     """Generic fall-back pipeline"""
@@ -531,14 +634,16 @@ async def route_to_pipeline(text: str, document_id: str, document_type: Optional
 
 async def professional_ingestion_workflow(text: str, document_id: str):
     """Standard Cognee Pipeline for generic documents"""
-    logger.info(f"🚀 Starting PROFESSIONAL ingestion workflow for {document_id}")
     try:
-        dataset_name = f"doc_{document_id}"
-        user_uuid = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
-        await asyncio.wait_for(cognee.add(data=text, dataset_name=dataset_name, user=User(id=user_uuid)), timeout=120.0)
-        await asyncio.wait_for(cognee.cognify(datasets=[dataset_name], user=User(id=user_uuid)), timeout=300.0)
-        logger.info(f"✅ Generic document ingested: {dataset_name}")
-        return {"status": "completed", "document_id": document_id}
+        # Use ECL without structured extraction (Generic)
+        result = await default_ecl.process(
+            doc_id=document_id,
+            text_content=text,
+            metadata={"type": "generic"},
+            extraction_task=None, # No structured extraction for generic docs yet
+            dataset_name_prefix="doc"
+        )
+        return {"status": "completed", "document_id": document_id, "dataset": result["dataset"]}
     except Exception as e:
         logger.error(f"Professional ingestion failed: {e}")
         raise
