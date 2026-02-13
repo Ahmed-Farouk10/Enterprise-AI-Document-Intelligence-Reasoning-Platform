@@ -2,6 +2,7 @@ import os
 import shutil
 import sys
 import logging
+import subprocess
 
 # --- 1. GLOBAL PATHS ---
 # We use /app/.cache/cognee_data as the single source of truth
@@ -14,19 +15,22 @@ MODELS_PATH = os.path.join(COGNEE_ROOT, "models")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cognee_setup")
 
+def log(msg, level="info"):
+    """Dual logging to logger and stderr for guaranteed visibility"""
+    getattr(logger, level)(msg)
+    print(f"[{level.upper()}] {msg}", file=sys.stderr)
+
 def verify_cognee_setup():
     """Ensures directories exist and cleans up broken states."""
+    log(f"[SETUP] Starting verification for COGNEE_ROOT: {COGNEE_ROOT}")
     
-    # 1. Nuclear Wipe on Restart (Optional but recommended for fixing DB locks)
-    # Only wipe if it exists and we want a fresh start. 
-    # For persistence, we might want to be less aggressive, but for now we keep it to fix errors.
-    if os.path.exists(DB_PATH):
+    # 1. Recursive Permissions Fix (The "Nuclear chmod")
+    if os.path.exists(COGNEE_ROOT):
         try:
-            # Check if DB is locked or corrupted
-            shutil.rmtree(DB_PATH)
-            logger.info(f"[CLEANUP] Wiped {DB_PATH} to ensure clean state.")
+            # log("[SETUP] Applying recursive 777 permissions...")
+            subprocess.run(["chmod", "-R", "777", COGNEE_ROOT], check=False)
         except Exception as e:
-            logger.warning(f"[WARNING] Cleanup failed: {e}")
+            log(f"[WARNING] chmod failed: {e}", "warning")
 
     # 2. Re-create structure with full permissions
     os.makedirs(DB_PATH, mode=0o777, exist_ok=True)
@@ -34,10 +38,9 @@ def verify_cognee_setup():
     os.makedirs(MODELS_PATH, mode=0o777, exist_ok=True)
 
     # 3. Set Environment Variables - AGGRESSIVE OVERRIDE
-    # We set EVERY possible variable Cognee might use to find its data
-    os.environ["COGNEE_ROOT_DIR"] = COGNEE_ROOT       # Used by some versions
-    os.environ["COGNEE_DATA_ROOT"] = COGNEE_ROOT      # Used by others
-    os.environ["COGNEE_CWD"] = COGNEE_ROOT            # Just in case
+    os.environ["COGNEE_ROOT_DIR"] = COGNEE_ROOT
+    os.environ["COGNEE_DATA_ROOT"] = COGNEE_ROOT
+    os.environ["COGNEE_CWD"] = COGNEE_ROOT
     
     # Explicitly set database paths
     os.environ["COGNEE_DB_PATH"] = DB_PATH
@@ -45,169 +48,118 @@ def verify_cognee_setup():
     
     # Storage paths
     os.environ["COGNEE_STORAGE_PATH"] = DATA_PATH
+    os.environ["COGNEE_FILES_PATH"] = DATA_PATH  # Newer cognee variable
     
     # 4. Configure Gemini (LLM)
     os.environ["LLM_PROVIDER"] = "gemini"
     os.environ["COGNEE_LLM_PROVIDER"] = "gemini"
     os.environ["LLM_MODEL"] = "gemini/gemini-2.0-flash"
-    os.environ["COGNEE_LLM_MODEL"] = "gemini/gemini-2.0-flash"
     
     # Ensure Key is present
     if not os.getenv("LLM_API_KEY"):
         os.environ["LLM_API_KEY"] = "AIzaSyChLF3hBJXMP2S5WGgYumMrNfZK-cURvZg"
 
-    # 5. Configure FastEmbed (Embeddings)
     os.environ["EMBEDDING_PROVIDER"] = "fastembed"
-    os.environ["COGNEE_EMBEDDING_PROVIDER"] = "fastembed"
-    os.environ["EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"
     
-    logger.info(f"[SETUP] Cognee Root: {COGNEE_ROOT}")
-    logger.info("[SETUP] Configuration Complete: Gemini + FastEmbed + Persistent Storage")
+    log(f"[SETUP] Configuration Complete. DB URL: {os.environ['COGNEE_DATABASE_URL']}")
 
 def apply_cognee_monkey_patch():
     """
-    Patches Cognee internals to force writable paths.
+    Titanium Patch: Aggressively replaces engine creation logic in sys.modules
     """
+    log("[PATCH] Starting Titanium Patch...")
+    
     try:
         import cognee
         from cognee.infrastructure.files.storage import LocalFileStorage
         
-        logger.info("[PATCH] Applying deep configuration overrides...")
-
-        # --- FIX 1: Override The File Storage Path ---
-        # This ensures files are saved to /app/.cache/cognee_data/data
+        # --- FIX 1: Override File Storage ---
         def forced_storage_path(self):
             return DATA_PATH
-
         LocalFileStorage.storage_path = property(forced_storage_path)
+        log("[PATCH] LocalFileStorage patched")
+
+        # --- FIX 2: Define The Safe Engine Creator ---
+        from sqlalchemy import create_engine
         
-        # --- FIX 2: Override The Relational Database Config ---
-        # depending on version, config might be in different places. We try both.
+        def create_safe_engine(**kwargs):
+            # log(f"[PATCH] create_safe_engine intercepted call. Args: {kwargs.keys()}")
+            
+            # DIRECT HACK: Always return a fresh valid engine to the specific path
+            db_url = f"sqlite:///{os.path.join(DB_PATH, 'cognee_db.db')}"
+            try:
+                # Ensure directory exists just in case
+                os.makedirs(DB_PATH, mode=0o777, exist_ok=True)
+                
+                # log(f"[PATCH] Creating manual engine: {db_url}")
+                return create_engine(db_url)
+            except Exception as e:
+                log(f"[FATAL] Failed to create manual engine: {e}", "error")
+                raise
+
+        # --- FIX 3: Hunt and Destroy ---
+        # We replace the function in every loaded module that might have it
+        
+        modules_patched = 0
+        target_name = "create_relational_engine"
+        
+        # 1. Patch the main location
         try:
-            from cognee.infrastructure.databases.relational import config as rel_config
-            rel_config.db_path = DB_PATH
-            rel_config.db_name = "cognee_db"
-            logger.info(f"[PATCH] Forced Relational DB Config (relational.config) to: {rel_config.db_path}")
+            import cognee.infrastructure.databases.relational as rel_pkg
+            rel_pkg.create_relational_engine = create_safe_engine
+            # Initialize singleton immediately
+            rel_pkg.relational_engine = create_safe_engine()
+            
+            # Patch getter to always return our singleton
+            def safe_get_engine():
+                return rel_pkg.relational_engine
+            rel_pkg.get_relational_engine = safe_get_engine
+            
+            log("[PATCH] cognee.infrastructure.databases.relational patched")
+            modules_patched += 1
         except ImportError:
             pass
 
+        # 2. Patch the submodule definition location
         try:
-            # Also try patching the core config if it exists
-            from cognee.shared import config as core_config
-            core_config.data_root_directory = COGNEE_ROOT
-            logger.info(f"[PATCH] Forced Core Config data_root to: {COGNEE_ROOT}")
+            import cognee.infrastructure.databases.relational.create_relational_engine as creator_mod
+            creator_mod.create_relational_engine = create_safe_engine
+            log("[PATCH] definition module patched")
+            modules_patched += 1
         except ImportError:
             pass
 
-        # --- FIX 3: Patch get_relational_engine to return a FRESH engine ---
-        # The singleton might have been initialized with bad paths before we got here.
-        # We explicitly re-initialize it if possible, or monkeypatch the factory.
-        
-        try:
-            from cognee.infrastructure.databases.relational import get_relational_engine
-            from cognee.infrastructure.databases.relational.create_relational_engine import create_relational_engine
-            
-            # --- FIX: Robust Engine Creation ---
-            # We create a wrapper that swallows extra args to match whatever signature Cognee 0.5.x expects
-            # while FORCING our own paths.
-            
-            def create_safe_engine(**kwargs):
-                logger.info(f"[PATCH] creating_engine called. Swallowing args: {list(kwargs.keys())}")
-                
-                # --- FIX: Permissions Recursively ---
-                try:
-                    import subprocess
-                    subprocess.run(["chmod", "-R", "777", COGNEE_ROOT], check=False)
-                except Exception:
-                    pass
+        # 3. Iterate sys.modules to find any other references
+        for mod_name, mod in list(sys.modules.items()):
+            if mod_name.startswith("cognee") and hasattr(mod, target_name):
+                setattr(mod, target_name, create_safe_engine)
+                # log(f"[PATCH] Patched {mod_name}")
 
-                # --- FIX: Robust Engine Creation with Fallback ---
-                try:
-                    logger.info("[PATCH] Attempting create_relational_engine with fixed args...")
-                    return create_relational_engine(
-                        db_path=DB_PATH,
-                        db_name="cognee_db",
-                        db_provider="sqlite",
-                        db_host="localhost",
-                        db_port=5432,
-                        db_username="cognee",
-                        db_password="password"
-                    )
-                except Exception as factory_error:
-                    logger.error(f"[PATCH] Cognee factory failed: {factory_error}. FALLING BACK TO MANUAL ENGINE.")
-                    
-                    # Manual SQLAlchemy Engine Creation
-                    from sqlalchemy import create_engine
-                    # Ensure 4 slashes for absolute path on *nix
-                    db_url = f"sqlite:///{os.path.join(DB_PATH, 'cognee_db.db')}"
-                    logger.info(f"[PATCH] Manually creating engine at: {db_url}")
-                    return create_engine(db_url)
-            
-            # Create the singleton instance
-            correct_engine = create_safe_engine()
-            
-            # Monkeypatch the getter to return our correct engine
-            import cognee.infrastructure.databases.relational as rel_module
-            
-            # 1. Patch the module-level singleton if it exists
-            if hasattr(rel_module, "relational_engine"):
-                rel_module.relational_engine = correct_engine
-                logger.info("[PATCH] Replaced cached relational_engine singleton.")
+        log(f"[PATCH] Titanium Patch Complete. Patched primary modules and singletons.")
 
-            # 2. Patch the get_relational_engine function
-            def patched_get_engine():
-                return correct_engine
-                
-            rel_module.get_relational_engine = patched_get_engine
-            logger.info("[PATCH] Monkey-patched get_relational_engine().")
-
-             # 3. Aggressive: Patch the create_relational_engine in the module itself
-             # This ensures that even if something imports it directly, it gets our wrapper
-            rel_module.create_relational_engine = create_safe_engine
-            logger.info("[PATCH] Monkey-patched create_relational_engine factory.")
-            
-        except Exception as e:
-            logger.warning(f"[WARNING] Could not patch engine factory: {e}")
-
-
-        # --- FIX 4: Patch Global 'os.makedirs' ---
-        # Catches any rogue attempts to create folders in read-only system paths
+        # --- FIX 4: Patch global makedirs just in case ---
         original_makedirs = os.makedirs
-        
         def patched_makedirs(name, mode=0o777, exist_ok=False):
             name_str = str(name)
-            # If it tries to write to site-packages/cognee, redirect it!
             if "site-packages" in name_str and "cognee" in name_str:
-                if ".anon_id" in name_str:
-                    new_path = os.path.join(COGNEE_ROOT, ".anon_id")
-                else:
-                    # Redirect everything else
-                    # We blindly replace the prefix to our root
-                    # This is dangerous but effective for "site-packages/cognee/.cognee_system"
-                    if ".cognee_system" in name_str:
-                        # Extract the part after .cognee_system
-                        parts = name_str.split(".cognee_system")
-                        if len(parts) > 1:
-                            subpath = parts[1].lstrip(os.sep)
-                            new_path = os.path.join(COGNEE_ROOT, subpath)
-                        else:
-                            new_path = COGNEE_ROOT
-                    else:
-                         new_path = name_str.replace(
-                            os.path.dirname(os.path.dirname(cognee.__file__)), 
-                            COGNEE_ROOT
-                        )
+                # Redirect to COGNEE_ROOT
+                if ".cognee_system" in name_str:
+                     parts = name_str.split(".cognee_system")
+                     if len(parts) > 1:
+                        new_path = os.path.join(COGNEE_ROOT, parts[1].lstrip(os.sep))
+                        return original_makedirs(new_path, mode, exist_ok)
                 
-                return original_makedirs(new_path, mode, exist_ok)
-                
+                return original_makedirs(name, mode, exist_ok)
             return original_makedirs(name, mode, exist_ok)
         
         os.makedirs = patched_makedirs
-        logger.info("[PATCH] os.makedirs redirected successfully.")
-        
-    except Exception as e:
-        logger.error(f"[FATAL] Patching failed: {e}")
+        log("[PATCH] os.makedirs redirection active")
 
-# Execute setup immediately when this module is imported
+    except Exception as e:
+        log(f"[FATAL] Patching failed: {e}", "error")
+        import traceback
+        traceback.print_exc()
+
+# Execute setup immediately
 verify_cognee_setup()
 apply_cognee_monkey_patch()
