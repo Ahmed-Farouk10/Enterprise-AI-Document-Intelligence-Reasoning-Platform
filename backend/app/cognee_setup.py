@@ -64,9 +64,14 @@ def configure_cognee_paths():
     os.environ["COGNEE_DB_PATH"] = os.path.join(cognee_root, "databases")
     os.environ["COGNEE_DATA_DIR"] = os.path.join(cognee_root, "data")
     
-    # CRITICAL: Fix telemetry permission error on HF Spaces
+    # CRITICAL: Disable telemetry to prevent "Permission denied" errors on read-only systems
+    os.environ["COGNEE_COLLECT_ANON_USAGE"] = "false"
+    
+    # CRITICAL: Fix telemetry permission error on HF Spaces (in case it tries anyway)
     # Cognee tries to write to /usr/local/lib/python3.11/site-packages/.anon_id
     os.environ["COGNEE_ANONYMOUS_ID_PATH"] = os.path.join(cognee_root, ".anon_id")
+    
+    # (Path configured earlier)
     
     # CRITICAL FIX: Configure embedding models to prevent downloads during runtime
     # Force Cognee to use small, fast local models instead of downloading large ones

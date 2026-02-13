@@ -272,6 +272,12 @@ class RedisCacheAdapter:
                     continue
                     
                 cached_vec = np.array(entry['embedding'])
+                
+                # Safety check for dimensions
+                if query_vec.shape != cached_vec.shape:
+                    logger.warning(f"Dimension mismatch in semantic cache: query={query_vec.shape}, cached={cached_vec.shape}")
+                    continue
+
                 similarity = np.dot(query_vec, cached_vec) / (
                     np.linalg.norm(query_vec) * np.linalg.norm(cached_vec)
                 )

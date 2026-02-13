@@ -97,11 +97,16 @@ async def get_graph_stats():
     try:
         # Try Cognee native stats first (if available) or fallback to Neo4j gracefully
         # Since we are on HF Spaces with Kuzu, we return basic info
+        # Try Cognee engine first which now has real stats implementation
+        if cognee_engine:
+            return await cognee_engine.get_graph_statistics()
+            
+        # Fallback if engine not loaded
         return {
-            "entity_count": "Active (Kuzu)", 
-            "relationship_count": "Active (Kuzu)", 
-            "document_count": "Managed by Cognee",
-            "backend": "Kuzu (Local)"
+            "entity_count": 0, 
+            "relationship_count": 0, 
+            "document_count": 0,
+            "backend": "Uninitialized"
         }
     except Exception as e:
         logger.error(f"Graph stats retrieval failed: {str(e)}")

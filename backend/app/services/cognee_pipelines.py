@@ -452,7 +452,8 @@ async def process_education_document(text: str, document_id: str) -> Any:
 async def _store_and_cognify(data_points: List[Any], dataset_name: str):
     """Helper to store data and trigger Cognify"""
     try:
-        await add_data_points(data_points, dataset_name=dataset_name, user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)))
+        # FIX: Cognee 0.5.x uses dataset_id, not dataset_name for add_data_points
+        await add_data_points(data_points, dataset_id=dataset_name, user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)))
         await cognee.cognify(datasets=[dataset_name], user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)))
         logger.info(f"✅ Data stored & cognified for {dataset_name}")
     except Exception as e:

@@ -14,36 +14,69 @@ class PatternEngine:
     
     async def extract_cross_document_patterns(self):
         """
-        Identify recurring patterns across all documents.
-        Runs as background job or on schedule.
+        Identify recurring patterns across all documents using Cognee.
         """
-        # Placeholder for cross-doc analysis logic
-        return []
+        try:
+            import cognee
+            from app.core.cognee_config import settings as cognee_settings
+            from cognee.modules.users.models import User
+            import uuid
+            
+            # Retrieve summaries from the graph to find high-level patterns
+            results = await cognee.search(
+                query_text="recurring themes and patterns",
+                query_type="SUMMARIES",
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+            )
+            return results
+        except Exception as e:
+            # logger.error(f"Pattern extraction failed: {e}")
+            return []
     
     async def consolidate_knowledge(self):
         """
-        Memory consolidation: Abstract general knowledge from specific instances.
-        Runs during low-usage periods.
+        Memory consolidation: behaviors.
         """
-        pass
+        try:
+            import cognee
+            from app.core.cognee_config import settings as cognee_settings
+            from cognee.modules.users.models import User
+            import uuid
+            
+            # Use Cognee's native memify to consolidate knowledge
+            await cognee.memify(
+                datasets=["cross_doc_knowledge"], # Virtual dataset
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+            )
+        except Exception:
+            pass
     
     async def learn_from_feedback(self, query: str, response: str, feedback: Dict):
         """
         Incorporate user feedback to improve future responses.
         """
         if feedback.get("rating") == "negative":
-            # Analyze what went wrong
-            # analysis = await self.llm.analyze_error(query, response, feedback["comment"])
-            
-            # Create correction memory
-            correction = {
-                "query": query,
-                "correction": feedback.get("comment", ""),
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            
-            # Store in DB (Placeholder)
-            # await self._store_correction_memory(correction)
+            try:
+                import cognee
+                from app.core.cognee_config import settings as cognee_settings
+                from cognee.modules.users.models import User
+                import uuid
+                
+                # Treat feedback as a new knowledge input
+                correction_text = f"Correction for query '{query}': {feedback.get('comment', 'No comment')}"
+                dataset_name = "feedback_memory"
+                
+                await cognee.add(
+                    data=correction_text,
+                    dataset_name=dataset_name,
+                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                )
+                await cognee.cognify(
+                    datasets=[dataset_name],
+                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                )
+            except Exception:
+                pass
 
 # Singleton placeholder
 pattern_engine = PatternEngine(None, None)
