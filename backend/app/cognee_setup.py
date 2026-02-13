@@ -150,44 +150,40 @@ def apply_cognee_monkey_patch():
         
         # Override the get_system_root_directory function if it exists
         if hasattr(cognee_utils, 'get_system_root_directory'):
-            original_func = cognee_utils.get_system_root_directory
-            
             def patched_get_system_root_directory(*args, **kwargs):
                 """Force return our configured path"""
-                print(f"[DEBUG] Cognee path intercepted - forcing: {COGNEE_ROOT}")
                 return COGNEE_ROOT
             
             cognee_utils.get_system_root_directory = patched_get_system_root_directory
             print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_system_root_directory")
         
-        # Also try to patch config module
-        try:
-            from cognee.infrastructure.databases.relational import config as db_config
-            if hasattr(db_config, 'get_database_url'):
-                original_db_url = db_config.get_database_url
-                
-                def patched_get_database_url(*args, **kwargs):
-                    db_path = os.path.join(COGNEE_ROOT, "databases", "cognee_db.db")
-                    url = f"sqlite:///{db_path}"
-                    print(f"[DEBUG] Database URL intercepted - forcing: {url}")
-                    return url
-                
-                db_config.get_database_url = patched_get_database_url
-                print(f"[SUCCESS] Monkey-patched database URL function")
-        except ImportError:
-            pass
-
         # CRITICAL FIX: Patch get_anonymous_id to prevent write permission errors
+        # We patch BOTH the utils module and the logging_utils module if accessible
+        static_anon_id = "hf-spaces-static-anon-id"
+        
+        def patched_get_anonymous_id():
+            return static_anon_id
+            
+        if hasattr(cognee_utils, 'get_anonymous_id'):
+            cognee_utils.get_anonymous_id = patched_get_anonymous_id
+            print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_anonymous_id")
+
+        # Try to patch logging_utils directly as that's where the error comes from
         try:
-            if hasattr(cognee_utils, 'get_anonymous_id'):
-                def patched_get_anonymous_id():
-                    # Return static ID for HF Spaces to avoid file writes
-                    return "hf-spaces-static-anon-id"
+            from cognee.shared import logging_utils
+            if hasattr(logging_utils, 'get_anonymous_id'):
+                logging_utils.get_anonymous_id = patched_get_anonymous_id
+                print(f"[SUCCESS] Monkey-patched cognee.shared.logging_utils.get_anonymous_id")
                 
-                cognee_utils.get_anonymous_id = patched_get_anonymous_id
-                print(f"[SUCCESS] Monkey-patched get_anonymous_id to bypass file system")
-        except Exception as e:
-            print(f"[WARNING] Failed to patch get_anonymous_id: {e}")
+            # Also patch the file path variable if it exists
+            if hasattr(logging_utils, 'ANONYMOUS_ID_PATH'):
+                logging_utils.ANONYMOUS_ID_PATH = os.path.join(COGNEE_ROOT, ".anon_id")
+                
+        except ImportError:
+            print("[WARNING] Could not import cognee.shared.logging_utils to patch it directly")
+
+        # Disable Kuzu/Neo4j checks if possible by mocking
+        # (Optional, but might help with the "Neo4j unavailable" noise)
 
     except ImportError as e:
         print(f"[WARNING] Could not apply monkey patch (Cognee not yet imported): {e}")
