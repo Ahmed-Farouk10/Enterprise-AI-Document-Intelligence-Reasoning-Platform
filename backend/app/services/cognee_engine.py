@@ -262,11 +262,11 @@ class CogneeEngine:
                         # For now, we just log.
                         raise creation_error
             
-            # Update the setting so other parts of the app use the correct ID if it changed
-            cognee_settings.DEFAULT_USER_ID = str(target_user_id)
-            logger.info(f"✅ Cognee initialized with User ID: {target_user_id}")
-            
-            logger.info("✅ Cognee engine initialized successfully")
+                # Update the setting so other parts of the app use the correct ID if it changed
+                cognee_settings.DEFAULT_USER_ID = str(target_user_id)
+                logger.info(f"✅ Cognee initialized with User ID: {target_user_id}")
+                
+                logger.info("✅ Cognee engine initialized successfully")
             
         except Exception as e:
             logger.error(f" Cognee initialization failed: {e}")
