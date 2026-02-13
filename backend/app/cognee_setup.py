@@ -10,15 +10,23 @@ import os
 import sys
 
 # =============================================================================
-# CRITICAL: SET LLM_API_KEY BEFORE ANYTHING ELSE
+# CRITICAL: SET LLM_API_KEY AND PROVIDER BEFORE ANYTHING ELSE
 # =============================================================================
-# Cognee checks for LLM_API_KEY during import and will fail if not set
-# This MUST be the very first thing we do
+# Cognee checks for LLM_API_KEY during import and will fail if not set.
+# We also must ensure it knows we are using HuggingFace if on Spaces.
 if not os.getenv("LLM_API_KEY"):
     # Use HF_TOKEN if available, otherwise use 'local' placeholder
     llm_key = os.getenv("HF_TOKEN", "local")
     os.environ["LLM_API_KEY"] = llm_key
-    print(f"[INFO] LLM_API_KEY set to: {llm_key[:10]}..." if len(llm_key) > 10 else f"[INFO] LLM_API_KEY set to: {llm_key}")
+    
+    # FORCE HuggingFace provider for LiteLLM/Cognee
+    os.environ["LLM_PROVIDER"] = "huggingface"
+    os.environ["COGNEE_LLM_PROVIDER"] = "huggingface"
+    # Prefix model with provider to be 100% sure litellm gets it
+    os.environ["LLM_MODEL"] = "huggingface/Qwen/Qwen2.5-7B-Instruct"
+    os.environ["COGNEE_LLM_MODEL"] = "huggingface/Qwen/Qwen2.5-7B-Instruct"
+    
+    print(f"[INFO] LLM Configured: Provider=huggingface, Model=Qwen/Qwen2.5-7B-Instruct")
 else:
     print(f"[INFO] LLM_API_KEY already set: {os.environ['LLM_API_KEY'][:10]}...")
 

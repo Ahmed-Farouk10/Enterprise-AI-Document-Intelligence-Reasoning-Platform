@@ -143,7 +143,12 @@ class CogneeEngine:
                 logger.info("✅ Forced Custom LLM Engine (Local Qwen for Structured Output)")
             except Exception as e_llm:
                 logger.error(f"❌ Failed to inject Custom LLM: {e_llm}")
-                # Fallback to config-based (which might default to OpenAI, sadly)
+                # Fallback to config-based, but FORCE proper provider if on HF Spaces
+                if os.getenv("HF_HOME") or os.getenv("HF_TOKEN"):
+                    logger.info("⚠️ Falling back to HuggingFace Provider (HF Spaces detected)")
+                    cognee.config.llm_provider = "huggingface"
+                    cognee.config.llm_model = "huggingface/Qwen/Qwen2.5-7B-Instruct"
+                    cognee.config.llm_api_key = os.getenv("HF_TOKEN", "")
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize custom engines: {e}")

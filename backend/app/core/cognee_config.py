@@ -57,7 +57,7 @@ class CogneeSettings(BaseSettings):
 
     # LLM & Embedding (Using Qwen + FastEmbed/SentenceTransformers)
     LLM_PROVIDER: str = os.getenv("COGNEE_LLM_PROVIDER", "huggingface")
-    LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+    LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "huggingface/Qwen/Qwen2.5-7B-Instruct")
     LLM_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
     
     # Standard Embedding Config (Matches Cognee 0.5.x expectations)
