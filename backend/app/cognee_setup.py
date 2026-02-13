@@ -125,15 +125,16 @@ def apply_cognee_monkey_patch():
                 def dialect(self):
                     return self._real_engine.dialect
 
-            # Ensure 4 slashes for absolute path on *nix
-            db_url = f"sqlite:///{os.path.join(DB_PATH, 'cognee_db.db')}"
-            logger.info(f"[PATCH] Manually creating engine at: {db_url}")
-            raw_engine = create_engine(db_url)
-            return RobustEngineAdapter(raw_engine)
+            try:
+                # Ensure 4 slashes for absolute path on *nix
+                db_url = f"sqlite:///{os.path.join(DB_PATH, 'cognee_db.db')}"
+                logger.info(f"[PATCH] Manually creating engine at: {db_url}")
+                raw_engine = create_engine(db_url)
+                return RobustEngineAdapter(raw_engine)
 
-        except Exception as e:
-            log(f"[FATAL] Failed to create manual engine: {e}", "error")
-            raise
+            except Exception as e:
+                log(f"[FATAL] Failed to create manual engine: {e}", "error")
+                raise
 
         # --- FIX 3: Hunt and Destroy ---
         # We replace the function in every loaded module that might have it
