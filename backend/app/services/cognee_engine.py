@@ -216,11 +216,14 @@ class CogneeEngine:
                 from cognee.modules.users.models import User
                 
                 target_user_id = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
-                existing_user = await get_user(target_user_id)
                 
-                if not existing_user:
+                try:
+                    # get_user raises EntityNotFoundError if not found (it doesn't return None)
+                    existing_user = await get_user(target_user_id)
+                    logger.info(f"✅ Verified available user: {target_user_id}")
+                except Exception:
+                    # Assuming any error means user doesn't exist or can't be found
                     logger.info(f"👤 Creating configured default user: {target_user_id}")
-                    # Create the user explicitly
                     await create_user(
                         user=User(
                             id=target_user_id,
@@ -229,8 +232,6 @@ class CogneeEngine:
                         )
                     )
                     logger.info(f"✅ Created user {target_user_id}")
-                else:
-                    logger.info(f"✅ Verified available user: {target_user_id}")
                     
             except Exception as user_error:
                 logger.warning(f"⚠️ User registration issue (non-fatal): {user_error}")

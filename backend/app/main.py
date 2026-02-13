@@ -11,7 +11,10 @@ os.environ["COGNEE_ROOT"] = cognee_root
 os.environ["COGNEE_ROOT_DIR"] = cognee_root 
 os.environ["SYSTEM_ROOT_DIRECTORY"] = cognee_root
 os.environ["COGNEE_DATA_STORAGE"] = f"{cognee_root}/data_storage"
-os.environ["COGNEE_ANON_ID_PATH"] = "/tmp/.cognee_anon_id"  # Fix telemetry warning
+os.environ["COGNEE_DATA_STORAGE"] = f"{cognee_root}/data_storage"
+# CRITICAL: Fix telemetry permission error
+os.environ["COGNEE_ANONYMOUS_ID_PATH"] = "/tmp/.cognee_anon_id"
+os.environ["ANONYMOUS_ID_PATH"] = "/tmp/.cognee_anon_id" # Try both variants
 
 # Create directories explicitly
 pathlib.Path(f"{cognee_root}/data_storage").mkdir(parents=True, exist_ok=True)
