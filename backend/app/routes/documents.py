@@ -1,6 +1,26 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request, Response, BackgroundTasks
 
-# ... imports ...
+from sqlalchemy.orm import Session
+from typing import List, Optional
+import shutil
+import os
+from pathlib import Path
+
+from app.schemas import DocumentResponse, PaginatedDocuments
+from app.db.database import get_db
+from app.db.models import Document
+from app.db.service import DatabaseService
+from app.services.retreival import vector_store
+from app.core.rate_limiter import limiter
+from app.core.logging_config import get_logger
+import uuid
+
+router = APIRouter(prefix="/api/documents", tags=["Documents"])
+logger = get_logger(__name__)
+
+# Ensure upload directory exists
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 async def process_document_background(document_id: str, file_path: Path, mime_type: str, original_filename: str):
     """Background task for document processing"""
