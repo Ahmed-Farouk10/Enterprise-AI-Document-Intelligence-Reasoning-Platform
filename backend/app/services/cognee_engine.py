@@ -266,7 +266,13 @@ class CogneeEngine:
                 cognee_settings.DEFAULT_USER_ID = str(target_user_id)
                 logger.info(f"✅ Cognee initialized with User ID: {target_user_id}")
                 
-                logger.info("✅ Cognee engine initialized successfully")
+                    logger.info("✅ Cognee engine initialized successfully")
+                
+            except ImportError:
+                logger.error("❌ Cognee user modules not found - skipping user creation")
+            except Exception as user_setup_error:
+                logger.error(f"❌ Error during user setup: {user_setup_error}")
+                # Don't fail the whole engine if user setup fails, but log it loudly
             
         except Exception as e:
             logger.error(f" Cognee initialization failed: {e}")
