@@ -129,32 +129,32 @@ class ECLProcessor:
                     )
 
             # STEP 4: COGNIFY (Graph Construction)
-            logger.info(f"🧠 [COGNIFY] Building Knowledge Graph...")
+            logger.info(f" [COGNIFY] Building Knowledge Graph for dataset: '{dataset_name}'...")
             try:
                 # Use extended timeout for specific environments
                 await asyncio.wait_for(
                     cognee.cognify(datasets=[dataset_name], user=user), 
                     timeout=self.config.cognify_timeout
                 )
-                logger.info(f"✅ ECL Pipeline success: Values persisted to Graph & Vector Store")
+                logger.info(f" ECL Pipeline success: Values persisted to Graph & Vector Store")
             except asyncio.TimeoutError:
-                logger.warning(f"⚠️ Cognify timed out after {self.config.cognify_timeout}s. Data is saved but graph relationships may be incomplete.")
+                logger.warning(f"Cognify timed out after {self.config.cognify_timeout}s. Data is saved but graph relationships may be incomplete.")
             except Exception as e:
                 # CRITICAL HANDLER for "TextSummary_text collection not found"
                 if "TextSummary" in str(e) or "collection not found" in str(e):
-                    logger.warning(f"⚠️ Vector store issue detected: {e}. Attempting recovery...")
+                    logger.warning(f" Vector store issue detected: {e}. Attempting recovery...")
                     # This often means the raw text node wasn't created properly.
                     # We supress this error because the structured data MIGHT still be there.
                     # In a production ECL, we'd dead-letter queue this.
                 else:
-                    logger.error(f"❌ Cognify failed: {e}")
+                    logger.error(f" Cognify failed: {e}")
                     # Don't re-raise if we want to return partial results (structured data extract was successful)
             
             # STEP 5: SELF-IMPROVEMENT (Memify Registration)
             try:
                 from app.services.cognee_background import memify_service
                 memify_service.register_dataset(dataset_name)
-                logger.info(f"🧠 Registered {dataset_name} for Memify maintenance")
+                logger.info(f"Registered {dataset_name} for Memify maintenance")
             except ImportError:
                 pass
 
@@ -165,7 +165,7 @@ class ECLProcessor:
             }
 
         except Exception as e:
-            logger.error(f"❌ ECL Pipeline failed for {doc_id}: {e}", exc_info=True)
+            logger.error(f" ECL Pipeline failed for {doc_id}: {e}", exc_info=True)
             raise
 
 # Global default processor
@@ -281,7 +281,7 @@ async def extract_resume_entities(text: str) -> Resume:
         resume = result.resume
         
         logger.info(
-            f"✅ Extracted resume: "
+            f" Extracted resume: "
             f"{resume.person.name}, "
             f"{len(resume.work_history)} positions, "
             f"{len(resume.education)} degrees, "
@@ -355,14 +355,14 @@ async def extract_skills_detailed(text: str) -> List[Skill]:
                 timeout=45.0  # Increased from 20s
             )
         except asyncio.TimeoutError:
-            logger.warning("⏰ Skill extraction timed out (20s). Skipping detailed skills.")
+            logger.warning(" Skill extraction timed out (20s). Skipping detailed skills.")
             return []
         
-        logger.info(f"✅ Extracted {len(result.skills)} detailed skills")
+        logger.info(f" Extracted {len(result.skills)} detailed skills")
         return result.skills
         
     except Exception as e:
-        logger.error(f"❌ Skill extraction failed: {e}", exc_info=True)
+        logger.error(f" Skill extraction failed: {e}", exc_info=True)
         return []
 
 
@@ -427,14 +427,14 @@ async def extract_work_history_timeline(text: str) -> List[WorkExperience]:
                 timeout=45.0
             )
         except asyncio.TimeoutError:
-            logger.warning("⏰ Work history extraction timed out (20s). Skipping timeline.")
+            logger.warning(" Work history extraction timed out (20s). Skipping timeline.")
             return []
         
-        logger.info(f"✅ Extracted {len(result.experiences)} work experiences")
+        logger.info(f" Extracted {len(result.experiences)} work experiences")
         return result.experiences
         
     except Exception as e:
-        logger.error(f"❌ Work history extraction failed: {e}", exc_info=True)
+        logger.error(f" Work history extraction failed: {e}", exc_info=True)
         return []
 
 

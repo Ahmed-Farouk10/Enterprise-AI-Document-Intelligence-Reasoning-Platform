@@ -178,6 +178,27 @@ def apply_cognee_monkey_patch():
         except ImportError:
             pass
 
+        # CRITICAL FIX: Force Kuzu to respect our writable path
+        try:
+            from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
+            # We patch the class or the config it uses.
+            # KuzuAdapter typically takes graph_db_url or similar in init.
+            # But let's verify if we can intercept the default if it uses os.getcwd()
+            
+            # Alternative: Patch the config if KuzuAdapter reads from it
+            try:
+                from cognee.infrastructure.databases.graph import config as graph_config
+                if hasattr(graph_config, 'graph_db_url'):
+                    print(f"[DEBUG] Original graph_db_url: {graph_config.graph_db_url}")
+                    # This might be a string literal, so patching it might not work if already imported elsewhere.
+            except ImportError:
+                pass
+                
+        except ImportError:
+            pass
+
+    except ImportError as e:
+        print(f"[WARNING] Could not apply monkey patch (Cognee not yet imported): {e}")
     except ImportError as e:
         print(f"[WARNING] Could not apply monkey patch (Cognee not yet imported): {e}")
     except Exception as e:

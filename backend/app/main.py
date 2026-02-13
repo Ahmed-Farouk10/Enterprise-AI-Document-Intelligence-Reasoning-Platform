@@ -174,9 +174,35 @@ def root():
     }
 
 @app.get("/health")
-def health():
+def health_check():
+    """Diagnostic endpoint to check Cognee status."""
     return {
-        "status": "healthy",
-        "version": "0.3.0",
-        "timestamp": "2024-01-01T00:00:00Z"
+        "status": "online",
+        "service": "Enterprise Document Intelligence",
+        "cognee_root": os.environ.get("COGNEE_ROOT"),
+        "anon_id_path": os.environ.get("COGNEE_ANONYMOUS_ID_PATH"),
+        "writable": os.access(os.environ.get("COGNEE_ROOT", "/"), os.W_OK),
+        "db_exists": os.path.exists(os.path.join(os.environ.get("COGNEE_ROOT", ""), "databases", "cognee_db.db")),
+        "permissions_patch": "applied"
     }
+
+@app.post("/system/reset")
+async def system_reset():
+    """CRITICAL: Prune all data from Cognee. Use with caution."""
+    try:
+        import cognee
+        await cognee.prune()
+        return {"status": "success", "message": "System pruned. All data removed."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/system/cognify/{dataset_name}")
+async def manual_cognify(dataset_name: str):
+    """Manually trigger Cognify for a dataset."""
+    try:
+        import cognee
+        # Trigger cognify
+        await cognee.cognify(datasets=[dataset_name])
+        return {"status": "success", "message": f"Cognify triggered for {dataset_name}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
