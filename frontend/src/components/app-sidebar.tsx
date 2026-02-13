@@ -30,7 +30,7 @@ const data = {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-    const { documents, loading, uploadDocument, deleteDocument, uploadProgress, error } = useDocuments()
+    const { documents, loading, uploadDocument, deleteDocument, uploadProgress, error, fetchDocuments } = useDocuments()
     const { toast } = useToast()
     const [isUploading, setIsUploading] = React.useState(false)
     const [currentProgress, setCurrentProgress] = React.useState(0)
@@ -38,7 +38,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     const [chatSessions, setChatSessions] = React.useState<ChatSession[]>([])
     const [sessionsLoading, setSessionsLoading] = React.useState(true)
 
-    // Fetch chat history
+    // Poll for updates (Chat sessions & Documents)
     React.useEffect(() => {
         const fetchSessions = async () => {
             try {
@@ -52,12 +52,25 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 setSessionsLoading(false)
             }
         }
+
+        // Initial fetch
         fetchSessions()
 
-        // Poll for updates every 10 seconds (temporary fix for real-time)
-        const interval = setInterval(fetchSessions, 10000)
+        // Poll every 5 seconds to keep UI in sync with background processing
+        const interval = setInterval(() => {
+            fetchSessions()
+            // Refresh documents list to catch status changes (pending -> completed)
+            if (fetchDocuments) {
+                fetchDocuments()
+            }
+        }, 5000)
+
         return () => clearInterval(interval)
-    }, [])
+    }, [fetchDocuments])
+
+    // Actually, let's just verify what we have.
+    // We have: const { documents, loading, uploadDocument, deleteDocument, uploadProgress, error } = useDocuments()
+    // We miss 'fetchDocuments' in destructuring. Let's add it.
 
     const handleUpload = async (file: File) => {
         setIsUploading(true)

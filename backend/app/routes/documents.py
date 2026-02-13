@@ -1,31 +1,99 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request, Response
-from sqlalchemy.orm import Session
-from typing import List, Optional
-import shutil
-import os
-from pathlib import Path
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request, Response, BackgroundTasks
 
-from app.schemas import DocumentResponse, PaginatedDocuments
-from app.db.database import get_db
-from app.db.models import Document
-from app.db.service import DatabaseService
-from app.services.retreival import vector_store
-from app.core.rate_limiter import limiter
-from app.core.logging_config import get_logger
-import uuid
+# ... imports ...
 
-logger = get_logger(__name__)
+async def process_document_background(document_id: str, file_path: Path, mime_type: str, original_filename: str):
+    """Background task for document processing"""
+    try:
+        logger.info(f"🔄 Starting background processing for doc_id={document_id}")
+        from app.db.database import SessionLocal
+        
+        # New DB session for background task
+        with SessionLocal() as db:
+            document = DatabaseService.get_document(db, document_id)
+            if not document:
+                logger.error(f"❌ Document {document_id} not found in background task")
+                return
 
-router = APIRouter(prefix="/api/documents", tags=["documents"])
+            try:
+                # Extract text using OCR Service
+                from app.services.ocr import ocr_service
+                text = ocr_service.extract_text(file_path, mime_type)
+                
+                # Index in vector store
+                if text and len(text.strip()) > 10:
+                    from app.services.retreival import vector_store
+                    vector_store.add_document(text=text, doc_id=document.id, doc_name=original_filename)
+                    vector_store.save_index()
+                    
+                    # Graph Processing (Cognee)
+                    try:
+                        from app.services.cognee_engine import cognee_engine
+                        logger.info(f" Processing graph for {document_id}")
+                        
+                        document_graph = await cognee_engine.ingest_document_professional(
+                            document_text=text,
+                            document_id=str(document.id),
+                            document_type="auto_detect",
+                            metadata={
+                                "filename": original_filename,
+                                "upload_date": document.created_at.isoformat(),
+                                "mime_type": mime_type
+                            }
+                        )
+                        
+                        # Extract stats safely
+                        is_success = False
+                        if hasattr(document_graph, 'success') and document_graph.success: is_success = True
+                        elif isinstance(document_graph, dict) and document_graph.get('success', False): is_success = True
+                        
+                        if is_success:
+                           def get_val(obj, key, default):
+                               if isinstance(obj, dict): return obj.get(key, default)
+                               return getattr(obj, key, default)
 
-# Create uploads directory
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
+                           document.extra_data = {
+                                "graph_stats": {
+                                    "entity_count": get_val(document_graph, "entity_count", 0),
+                                    "document_type": get_val(document_graph, "document_type", "unknown"),
+                                    "dataset_name": get_val(document_graph, "dataset_name", ""),
+                                    "entities": get_val(document_graph, "entities", {})
+                                }
+                           }
+                    
+                    except Exception as cognee_error:
+                         logger.error(f"⚠️ Cognee failed: {cognee_error}")
+                         if not document.extra_data: document.extra_data = {}
+                         document.extra_data["cognee_error"] = str(cognee_error)
+
+                    document.status = "completed"
+                    logger.info(f"✅ Document {document_id} processing complete")
+                
+                else:
+                    document.status = "failed"
+                    logger.warning(f"⚠️ No text extracted for {document_id}")
+            
+            except Exception as e:
+                logger.error(f"❌ Processing failed for {document_id}: {e}")
+                document.status = "failed"
+            
+            finally:
+                db.commit()
+
+    except Exception as e_outer:
+        logger.error(f"🔥 Critical background task error: {e_outer}")
+
 
 @router.post("/upload", response_model=DocumentResponse)
 @limiter.limit("10/hour")
-async def upload_document(request: Request, response: Response, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Upload a document and dispatch async processing job"""
+async def upload_document(
+    request: Request, 
+    response: Response, 
+    file: UploadFile = File(...), 
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db)
+):
+    """Upload a document and dispatch background processing"""
     
     # Validate file type
     allowed_types = ["application/pdf", "text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
@@ -54,7 +122,7 @@ async def upload_document(request: Request, response: Response, file: UploadFile
         if existing_docs:
             new_version = existing_docs.version + 1
             
-        # Create document record in database with "pending" status
+        # Create document record
         document = DatabaseService.create_document(
             db=db,
             filename=unique_filename,
@@ -64,106 +132,23 @@ async def upload_document(request: Request, response: Response, file: UploadFile
             version=new_version
         )
         
-        # Set initial status to pending
+        # Set initial status
         document.status = "pending"
         db.commit()
         db.refresh(document)
         
-        # FORCED INLINE PROCESSING (Celery worker not available in HF Spaces)
-        logger.info(f"📄 Processing document inline: {file.filename}")
+        # Dispatch background task
+        background_tasks.add_task(
+            process_document_background, 
+            str(document.id), 
+            file_path, 
+            file.content_type, 
+            file.filename
+        )
         
-        # Extract text using OCR Service
-        try:
-            from app.services.ocr import ocr_service
-            text = ocr_service.extract_text(file_path, file.content_type)
-            
-        except Exception as extraction_error:
-            logger.error(f"❌ Text extraction failed: {extraction_error}", exc_info=True)
-            document.status = "failed"
-            db.commit()
-            raise HTTPException(status_code=500, detail=f"Text extraction failed: {str(extraction_error)}")
+        logger.info(f"🚀 Dispatched background processing for {document.id}")
         
-        # Index in vector store
-        if text and len(text.strip()) > 10:
-            try:
-                logger.info(f"🔍 Indexing to vector store: doc_id={document.id}")
-                vector_store.add_document(
-                    text=text,
-                    doc_id=document.id,
-                    doc_name=file.filename
-                )
-                # CRITICAL: Save vector store to disk so it persists
-                vector_store.save_index()
-                
-                # Process with Cognee for knowledge graph (PROFESSIONAL PIPELINE)
-                logger.info(f" Processing with Cognee Professional Pipeline: doc_id={document.id}")
-                try:
-                    from app.services.cognee_engine import cognee_engine
-                    
-                    # Use professional pipeline with structured extraction
-                    document_graph = await cognee_engine.ingest_document_professional(
-                        document_text=text,
-                        document_id=str(document.id),
-                        document_type="auto_detect",  # Auto-detect resume vs other
-                        metadata={
-                            "filename": file.filename,
-                            "upload_date": document.created_at.isoformat(),
-                            "mime_type": file.content_type
-                        }
-                    )
-                    
-                    # Handle response (can be Resume object or dict from generic pipeline)
-                    is_success = False
-                    
-                    if hasattr(document_graph, 'success') and document_graph.success:
-                         is_success = True
-                    elif isinstance(document_graph, dict) and document_graph.get('success', False):
-                         is_success = True
-                    
-                    if is_success:
-                        # Extract stats safely from either object or dict
-                        def get_val(obj, key, default):
-                            if isinstance(obj, dict):
-                                return obj.get(key, default)
-                            return getattr(obj, key, default)
-
-                        document.extra_data = {
-                            "graph_stats": {
-                                "entity_count": get_val(document_graph, "entity_count", 0),
-                                "document_type": get_val(document_graph, "document_type", "unknown"),
-                                "dataset_name": get_val(document_graph, "dataset_name", ""),
-                                "entities": get_val(document_graph, "entities", {})
-                            }
-                        }
-                        
-                        entity_count = get_val(document_graph, "entity_count", 0)
-                        doc_type = get_val(document_graph, "document_type", "document")
-                        logger.info(f"✅ Cognee processing complete: {entity_count} entities extracted ({doc_type})")
-                    
-                except Exception as cognee_error:
-                    logger.error(f"⚠️ Cognee professional pipeline failed (non-fatal): {cognee_error}", exc_info=True)
-                    # Don't fail the whole upload if Cognee fails
-                    if not document.extra_data:
-                        document.extra_data = {}
-                    document.extra_data["cognee_error"] = str(cognee_error)
-                
-                document.status = "completed"
-                logger.info(f"✅ DOCUMENT INDEXED SUCCESSFULLY: {len(text)} chars, doc_id={document.id}, chunks={len(text)//300}")
-            except Exception as index_error:
-                logger.error(f"❌ Vector store indexing failed: {index_error}", exc_info=True)
-                document.status = "failed"
-                db.commit()
-                raise HTTPException(status_code=500, detail=f"Indexing failed: {str(index_error)}")
-        else:
-            logger.warning(f"⚠️ No text extracted from document: {document.id} (text length: {len(text)})")
-            document.status = "failed"
-        
-        db.commit()
-        db.refresh(document)
-        
-        logger.info("document_processed_inline", doc_id=document.id, filename=file.filename, mode="inline", status=document.status)
-        
-        # Return with status
+        # Return immediately with pending status
         return {
             "id": document.id,
             "filename": document.filename,
@@ -171,20 +156,16 @@ async def upload_document(request: Request, response: Response, file: UploadFile
             "file_size": document.file_size,
             "mime_type": document.mime_type,
             "uploaded_at": document.created_at.isoformat(),
-            "processed_at": document.updated_at.isoformat() if document.status == "completed" else None,
-            "status": document.status,
+            "processed_at": None,
+            "status": "pending",
             "version": document.version,
             "metadata": {
-                "task_id": "inline",
-                "processing_mode": "inline",
-                "text_length": len(text) if text else 0,
-                "message": "Document processed inline." if document.status == "completed" else "Processing failed."
+                "message": "Upload successful. Processing in background."
             }
         }
     
     except Exception as e:
         logger.error("document_upload_failed", error=str(e), exc_info=True)
-        # Clean up file if database operation fails
         if file_path.exists():
             os.remove(file_path)
         raise HTTPException(status_code=500, detail=f"Failed to upload document: {str(e)}")

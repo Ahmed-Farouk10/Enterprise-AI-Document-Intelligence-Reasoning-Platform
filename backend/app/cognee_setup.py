@@ -16,11 +16,11 @@ import sys
 # This MUST be the very first thing we do
 if not os.getenv("LLM_API_KEY"):
     # Use HF_TOKEN if available, otherwise use 'local' placeholder
-    llm_key = os.getenv("HF_TOKEN", "local")
-    os.environ["LLM_API_KEY"] = llm_key
-    print(f"🔑 LLM_API_KEY set to: {llm_key[:10]}..." if len(llm_key) > 10 else "🔑 LLM_API_KEY set to: local")
+# Print configuration status
+    llm_key = os.getenv("LLM_API_KEY", "")
+    print(f"[INFO] LLM_API_KEY set to: {llm_key[:10]}..." if len(llm_key) > 10 else "[INFO] LLM_API_KEY set to: local")
 else:
-    print(f"🔑 LLM_API_KEY already set: {os.environ['LLM_API_KEY'][:10]}...")
+    print(f"[INFO] LLM_API_KEY already set: {os.environ['LLM_API_KEY'][:10]}...")
 
 # =============================================================================
 # COGNEE PATH CONFIGURATION (AGGRESSIVE)
@@ -105,7 +105,7 @@ def configure_cognee_paths():
     os.environ["EMBEDDING_SIZE"] = "384"
     os.environ["VECTOR_SIZE"] = "384"
     
-    print(f"📦 Model cache directory: {models_dir}")
+    print(f"[INFO] Model cache directory: {models_dir}")
     
     # Database configuration - use SQLite for Cognee's internal database
     # This is separate from the application's PostgreSQL database
@@ -116,7 +116,7 @@ def configure_cognee_paths():
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"  # Full SQLite URL
     
     print(f"=" * 80)
-    print(f"🧠 COGNEE CONFIGURATION (AGGRESSIVE)")
+    print(f"[INFO] COGNEE CONFIGURATION (AGGRESSIVE)")
     print(f"=" * 80)
     print(f"Environment: {env_type}")
     print(f"Cognee Root: {cognee_root}")
@@ -154,11 +154,11 @@ def apply_cognee_monkey_patch():
             
             def patched_get_system_root_directory(*args, **kwargs):
                 """Force return our configured path"""
-                print(f"🔧 Cognee path intercepted - forcing: {COGNEE_ROOT}")
+                print(f"[DEBUG] Cognee path intercepted - forcing: {COGNEE_ROOT}")
                 return COGNEE_ROOT
             
             cognee_utils.get_system_root_directory = patched_get_system_root_directory
-            print(f"✅ Monkey-patched cognee.shared.utils.get_system_root_directory")
+            print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_system_root_directory")
         
         # Also try to patch config module
         try:
@@ -169,11 +169,11 @@ def apply_cognee_monkey_patch():
                 def patched_get_database_url(*args, **kwargs):
                     db_path = os.path.join(COGNEE_ROOT, "databases", "cognee_db.db")
                     url = f"sqlite:///{db_path}"
-                    print(f"🔧 Database URL intercepted - forcing: {url}")
+                    print(f"[DEBUG] Database URL intercepted - forcing: {url}")
                     return url
                 
                 db_config.get_database_url = patched_get_database_url
-                print(f"✅ Monkey-patched database URL function")
+                print(f"[SUCCESS] Monkey-patched database URL function")
         except ImportError:
             pass
 
@@ -185,14 +185,14 @@ def apply_cognee_monkey_patch():
                     return "hf-spaces-static-anon-id"
                 
                 cognee_utils.get_anonymous_id = patched_get_anonymous_id
-                print(f"✅ Monkey-patched get_anonymous_id to bypass file system")
+                print(f"[SUCCESS] Monkey-patched get_anonymous_id to bypass file system")
         except Exception as e:
-            print(f"⚠️ Failed to patch get_anonymous_id: {e}")
+            print(f"[WARNING] Failed to patch get_anonymous_id: {e}")
 
     except ImportError as e:
-        print(f"⚠️ Could not apply monkey patch (Cognee not yet imported): {e}")
+        print(f"[WARNING] Could not apply monkey patch (Cognee not yet imported): {e}")
     except Exception as e:
-        print(f"⚠️ Monkey patch failed: {e}")
+        print(f"[WARNING] Monkey patch failed: {e}")
 
 
 # =============================================================================
@@ -208,7 +208,7 @@ def verify_cognee_setup():
     """Verify Cognee can initialize with our configuration."""
     try:
         import cognee
-        print(f"✅ Cognee {cognee.__version__} imported successfully")
+        print(f"[SUCCESS] Cognee {cognee.__version__} imported successfully")
         
         # Try to apply patches after import
         apply_cognee_monkey_patch()
@@ -216,13 +216,13 @@ def verify_cognee_setup():
         # Check if database directory is accessible
         db_path = os.path.join(COGNEE_ROOT, "databases")
         if os.path.exists(db_path) and os.access(db_path, os.W_OK):
-            print(f"✅ Database directory writable: {db_path}")
+            print(f"[SUCCESS] Database directory writable: {db_path}")
         else:
-            print(f"⚠️ Database directory issue: {db_path}")
+            print(f"[WARNING] Database directory issue: {db_path}")
         
         return True
     except Exception as e:
-        print(f"❌ Cognee import failed: {e}")
+        print(f"[ERROR] Cognee import failed: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -230,6 +230,6 @@ def verify_cognee_setup():
 
 if __name__ == "__main__":
     # Test configuration
-    print("\n🧪 Testing Cognee Configuration...")
+    print("\n[TEST] Testing Cognee Configuration...")
     verify_cognee_setup()
 
