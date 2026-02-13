@@ -33,7 +33,7 @@ if llm_key.startswith("hf_") or os.getenv("HF_TOKEN"):
     os.environ["COGNEE_LLM_PROVIDER"] = "openai"
     
     # FIX: LiteLLM requires 'huggingface/' prefix for models used via HF Inference API
-    # We apply this to both LLM_MODEL and COGNEE_LLM_MODEL
+    # Without this prefix, the graph extraction fails silently!
     model_id = "huggingface/Qwen/Qwen2.5-7B-Instruct"
     hf_endpoint = f"https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct/v1"
     
@@ -176,9 +176,9 @@ def configure_cognee_paths():
     if os.path.exists(cognee_db_dir):
         try:
             shutil.rmtree(cognee_db_dir)
-            print(f"[CLEANUP] Wiped {cognee_db_dir} to resolve UNIQUE constraint deadlock.")
+            print(f"[CLEANUP] Successfully wiped {cognee_db_dir} to clear UNIQUE constraint error.")
         except Exception as e:
-            print(f"[WARNING] Could not wipe databases folder: {e}")
+            print(f"[WARNING] Manual cleanup failed: {e}")
 
     # Re-create the folder so it's ready for Cognee
     os.makedirs(cognee_db_dir, mode=0o777, exist_ok=True)

@@ -16,7 +16,8 @@ if persistent_root and os.path.exists(persistent_root):
     # Ensure nested user_data directory exists (Separated from Cognee's 'databases' folder which we wipe on boot)
     persistent_db_dir = os.path.join(persistent_root, "user_data")
     os.makedirs(persistent_db_dir, exist_ok=True)
-    DATABASE_PATH = os.path.join(persistent_db_dir, "app_persistent.db")
+    # Using app_main.db as requested, but keeping it in user_data for persistence
+    DATABASE_PATH = os.path.join(persistent_db_dir, "app_main.db")
 elif os.path.exists("/data") and os.access("/data", os.W_OK):
     DATABASE_PATH = "/data/docucentric.db"
 else:
