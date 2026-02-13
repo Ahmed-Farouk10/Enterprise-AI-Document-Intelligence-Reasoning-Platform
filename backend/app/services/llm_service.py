@@ -169,6 +169,12 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             if is_hf_spaces:
                 logger.warning(f"🌐 Running on HuggingFace Spaces - Skipping local model load for {self.model_name}")
                 logger.warning("💡 Will use HuggingFace Inference API for completions")
+                
+                # MEMORY OPTIMIZATION: Skip tokenizer if low memory mode is enabled
+                if os.getenv("COGNEE_LOW_MEMORY_MODE") == "true":
+                     logger.info("⚡ Low Memory Mode: Skipping local tokenizer load (Will rely on API)")
+                     return
+
                 # Only load tokenizer for text processing
                 try:
                     self.tokenizer = AutoTokenizer.from_pretrained(

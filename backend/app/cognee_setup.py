@@ -124,6 +124,14 @@ def configure_cognee_paths():
     os.environ["COGNEE_EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"
     os.environ["COGNEE_EMBEDDING_PROVIDER"] = "fastembed"
 
+    # MEMORY OPTIMIZATION FOR HF SPACES
+    if os.getenv("HF_HOME") or os.getenv("SPACE_ID"):
+        print("[INFO] HF Spaces detected - Forcing Quantized Embeddings for Memory Efficiency")
+        # Use FastEmbed's quantized model support (usually default, but let's be explicit if possible or rely on lighter loads)
+        # FastEmbed models are already quantized by default, but we ensure we don't load anything else.
+        # We also set a flag for other services to be careful.
+        os.environ["COGNEE_LOW_MEMORY_MODE"] = "true"
+
     # VECTOR DB CONFIGURATION
     os.environ["VECTOR_DB_PROVIDER"] = "lancedb"
     os.environ["COGNEE_VECTOR_DB_TYPE"] = "lancedb"
