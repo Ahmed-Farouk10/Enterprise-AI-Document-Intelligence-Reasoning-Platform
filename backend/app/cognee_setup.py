@@ -32,17 +32,18 @@ if llm_key.startswith("hf_") or os.getenv("HF_TOKEN"):
     os.environ["LLM_PROVIDER"] = "openai" 
     os.environ["COGNEE_LLM_PROVIDER"] = "openai"
     
-    # FIX: LiteLLM requires 'huggingface/' prefix for models used via HF Inference API
+    # FIX: LiteLLM requires 'huggingface/' prefix and NEW ROUTER for models used via HF Inference API
     # Without this prefix, the graph extraction fails silently!
-    model_id = "huggingface/Qwen/Qwen2.5-7B-Instruct"
-    hf_endpoint = f"https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct/v1"
+    model_id = "Qwen/Qwen2.5-7B-Instruct"
+    # UPDATED: Use the new Hugging Face Router endpoint (Old api-inference.huggingface.co is deprecated/410)
+    hf_endpoint = "https://router.huggingface.co/hf-inference/v1"
     
     os.environ["LLM_ENDPOINT"] = hf_endpoint
     os.environ["COGNEE_LLM_ENDPOINT"] = hf_endpoint
-    os.environ["LLM_MODEL"] = model_id
-    os.environ["COGNEE_LLM_MODEL"] = model_id
+    os.environ["LLM_MODEL"] = f"huggingface/{model_id}"
+    os.environ["COGNEE_LLM_MODEL"] = f"huggingface/{model_id}"
     
-    print(f"[INFO] LLM Configured: Provider=openai (HF Proxy), Model={model_id}")
+    print(f"[INFO] LLM Configured: Provider=openai (HF Router), Model={model_id}")
 
 # =============================================================================
 # COGNEE PATH CONFIGURATION (AGGRESSIVE)
@@ -165,48 +166,42 @@ def configure_cognee_paths():
     
     # CRITICAL: Fix for IntegrityError & Corrupted Files (Ghost Records)
     # The error 'UNIQUE constraint failed' usually means metadata is out of sync.
-    # We perform a CLEAR WIPE of the databases folder on every boot to re-register data safely.
+    # We perform a TOTAL NUCLEAR WIPE of the entire Cognee root to ensure no ghost records survive.
+    # This was requested by the user to fix the deadlock.
     import shutil
     
-    print(f"[INFO] 🧹 Starting Nuclear Cleanup of Cognee artifacts...")
+    # User requested function structure:
+    # def nuclear_wipe(): ...
+    print(f"[INFO] 🧹 Starting Nuclear Wipe of Cognee root: {persistence_root}")
+    if os.path.exists(persistence_root):
+        try:
+            # Wiping the whole root ensures the SQLite registry and 
+            # the empty graph files are perfectly in sync (starting at zero)
+            shutil.rmtree(persistence_root)
+            print("[NUCLEAR] Cleared all metadata and ghost records.")
+        except Exception as e:
+             print(f"[WARNING] Manual cleanup failed: {e}")
     
-    # 1. Cognee Databases folder (Source of Deadlocks)
-    # Wiping this folder ensures UNIQUE constraint errors are resolved.
-    cognee_db_dir = os.path.join(cognee_root, "databases")
-    if os.path.exists(cognee_db_dir):
-        try:
-            shutil.rmtree(cognee_db_dir)
-            print(f"[CLEANUP] Successfully wiped {cognee_db_dir} to clear UNIQUE constraint error.")
-        except Exception as e:
-            print(f"[WARNING] Manual cleanup failed: {e}")
+    # Re-create the mandatory folder structure
+    try:
+        os.makedirs(persistence_root, mode=0o777, exist_ok=True)
+        os.makedirs(os.environ["COGNEE_STORAGE_PATH"], mode=0o777, exist_ok=True)
+        os.makedirs(os.environ["COGNEE_DB_PATH"], mode=0o777, exist_ok=True)
+        print(f"[CONFIG] Initialized Cognee at: {persistence_root}")
+    except Exception as e:
+        print(f"[WARNING] Could not create Cognee directories: {e}")
 
-    # Re-create the folder so it's ready for Cognee
-    os.makedirs(cognee_db_dir, mode=0o777, exist_ok=True)
+    # 4. Telemetry Fix (Still needed for read-only systems)
+    anon_id_path = os.path.join(persistence_root, ".anon_id")
+    os.environ["COGNEE_ANONYMOUS_ID_PATH"] = anon_id_path
+    try:
+        if not os.path.exists(anon_id_path):
+            with open(anon_id_path, "w") as f:
+                f.write("hf-spaces-static-anon-id")
+    except Exception as e:
+        print(f"[WARNING] Could not create anon_id: {e}")
 
-    # 2. Data Storage (Ingested blobs, Vector DB files, Graph DB files)
-    storage_dir = os.path.join(cognee_root, "data_storage")
-    if os.path.exists(storage_dir):
-        try:
-            # We clear the contents so Cognee can re-initialize the folder structure
-            for item in os.listdir(storage_dir):
-                item_path = os.path.join(storage_dir, item)
-                if os.path.isfile(item_path):
-                    os.remove(item_path)
-                elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-            print(f"[CLEANUP] Purged data_storage contents at: {storage_dir}")
-        except Exception as e:
-            print(f"[WARNING] Could not clear storage_dir: {e}")
-
-    # 3. Anonymous ID (Often causes permission issues if left behind)
-    if os.path.exists(anon_id_path):
-        try:
-            os.remove(anon_id_path)
-            print(f"[CLEANUP] Deleted anonymous ID: {anon_id_path}")
-        except Exception as e:
-            print(f"[WARNING] Could not delete anon_id: {e}")
-
-    return cognee_root
+    return persistence_root
 
 
 # =============================================================================

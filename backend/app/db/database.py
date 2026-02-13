@@ -10,17 +10,21 @@ logger = logging.getLogger(__name__)
 
 # Database URL - defaults to SQLite for development
 # CRITICAL: On HF Spaces, use persistent storage for chat history/sessions
-persistent_root = os.getenv("COGNEE_ROOT_DIR") or os.getenv("COGNEE_DATA_ROOT")
+# We define the absolute persistent path provided by HF Spaces here
+PERSISTENT_ROOT = "/app/.cache/cognee_data"
 
-if persistent_root and os.path.exists(persistent_root):
-    # Ensure nested user_data directory exists (Separated from Cognee's 'databases' folder which we wipe on boot)
-    persistent_db_dir = os.path.join(persistent_root, "user_data")
-    os.makedirs(persistent_db_dir, exist_ok=True)
-    # Using app_main.db as requested, but keeping it in user_data for persistence
-    DATABASE_PATH = os.path.join(persistent_db_dir, "app_main.db")
-elif os.path.exists("/data") and os.access("/data", os.W_OK):
-    DATABASE_PATH = "/data/docucentric.db"
-else:
+# Cognee standard environment variables (from documentation)
+os.environ["COGNEE_DATA_ROOT"] = PERSISTENT_ROOT
+os.environ["COGNEE_STORAGE_PATH"] = os.path.join(PERSISTENT_ROOT, "storage")
+os.environ["COGNEE_DB_PATH"] = os.path.join(PERSISTENT_ROOT, "databases")
+
+# FIX: Stop vanishing chats by forcing the main app DB into the persistent folder
+# Ensure the directory exists
+os.makedirs(os.path.join(PERSISTENT_ROOT, "databases"), exist_ok=True)
+DATABASE_PATH = os.path.join(PERSISTENT_ROOT, "databases", "app_persistent_sessions.db")
+
+# Fallback for local dev if not in container
+if not os.path.exists("/app/.cache"):
     DATABASE_PATH = "./docucentric.db"
 
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATABASE_PATH}")

@@ -64,8 +64,23 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(asyncio.to_thread(llm_service.warmup))
 
     # Initialize Cognee Engine
+    # Initialize Cognee Engine
     async def init_cognee():
         try:
+            # Standard maintenance: Prune stale metadata on startup (User Requested Fix)
+            try:
+                import cognee
+                # This clears the local metadata registry safely to resolve UNIQUE constraint errors
+                if hasattr(cognee, "prune_system"):
+                    await cognee.prune_system()
+                    logger.info("application_startup", status="cognee_system_pruned")
+                else:
+                    # Fallback for older/different versions causing issues
+                    await cognee.prune()
+                    logger.info("application_startup", status="cognee_pruned")
+            except Exception as e:
+                 logger.warning(f"Prune failed (non-critical): {e}")
+
             from app.services.cognee_engine import cognee_engine
             await cognee_engine.initialize()
             logger.info("application_startup", status="cognee_initialized")
