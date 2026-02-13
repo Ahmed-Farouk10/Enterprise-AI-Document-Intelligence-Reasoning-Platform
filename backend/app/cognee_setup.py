@@ -102,6 +102,30 @@ def apply_cognee_monkey_patch():
     except Exception as e:
         pass
 
+    # 3. CRITICAL: Patch os.makedirs to intercept site-packages writes
+    # This catches deep internal calls in Cognee that ignore our config
+    import os
+    original_makedirs = os.makedirs
+    def patched_makedirs(name, mode=0o777, exist_ok=False):
+        if "site-packages/cognee" in str(name):
+            try:
+                # Redirect internal hidden folder creation to our writable cache
+                if ".cognee_system" in str(name):
+                    new_path = str(name).replace("/usr/local/lib/python3.11/site-packages/cognee", target_root)
+                    # Handle both relative and absolute path mismatches
+                    if "/site-packages/" in new_path:
+                         new_path = os.path.join(target_root, ".cognee_system")
+                    
+                    print(f"[PATCH] Redirected {name} -> {new_path}")
+                    return original_makedirs(new_path, mode, exist_ok)
+            except Exception as inner:
+                print(f"[WARNING] Redirect logic failed: {inner}")
+                
+        return original_makedirs(name, mode, exist_ok)
+    
+    os.makedirs = patched_makedirs
+    print("[SUCCESS] Deep Monkey Patch applied to os.makedirs")
+
 # Apply Patches immediately
 apply_cognee_monkey_patch()
 
