@@ -9,24 +9,25 @@ if not os.getenv("LLM_API_KEY"):
     os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN", "local")
     print(f"🔑 LLM_API_KEY set to: {os.environ['LLM_API_KEY'][:10]}..." if len(os.environ['LLM_API_KEY']) > 10 else "local")
 
-# --- COGNEE PATH CONFIGURATION (MUST BE BEFORE IMPORT) ---
-# Detect persistent directory for HuggingFace Spaces
-if os.path.exists("/data") and os.access("/data", os.W_OK):
-    # CRITICAL: Use /data for persistence
-    _cognee_root = os.path.join("/data", "cognee_data")
-    print(f"📦 Cognee persisting to: {_cognee_root}")
-elif os.getenv("HF_HOME"):
-    _cognee_root = os.path.join(os.getenv("HF_HOME"), "cognee_data")
-else:
-    _cognee_root = os.path.join(os.getcwd(), ".cognee_system")
+# --- CRITICAL: INHERIT FROM CENTRAL SETUP ---
+# We reuse the logic from app/cognee_setup.py to ensure consistency
+try:
+    from app.cognee_setup import COGNEE_ROOT, verify_cognee_setup
+except ImportError:
+    # If import fails (e.g. running script directly), define basic fallback
+    # But ideally, this should never happen in the app context
+    print("⚠️ WARNING: Could not import cognee_setup. Using fallback defaults.")
+    COGNEE_ROOT = "/app/.cache/cognee_data"
 
-# Ensure directory exists
+_cognee_root = COGNEE_ROOT
+print(f"📦 Cognee Config inherits Root: {_cognee_root}")
+
+# Ensure directory exists (redundant but safe)
 os.makedirs(_cognee_root, exist_ok=True)
 
-# Set env vars for Cognee to pick up
+# Set env vars for Cognee (Reinforcing what setup already did)
 os.environ["COGNEE_ROOT_DIR"] = _cognee_root
-# Force SQLite db path inside persistence
-os.environ["COGNEE_DATABASE_URL"] = f"sqlite:///{_cognee_root}/cognee.db"
+os.environ["COGNEE_DATABASE_URL"] = f"sqlite:///{_cognee_root}/databases/cognee_db.db"
 
 # CRITICAL FIX: Skip LLM connection test on HF Spaces
 # Cognee's setup_and_check_environment() calls test_llm_connection() which hangs for 30+ seconds
