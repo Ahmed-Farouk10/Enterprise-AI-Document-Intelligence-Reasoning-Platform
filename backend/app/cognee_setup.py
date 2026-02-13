@@ -111,6 +111,9 @@ def apply_cognee_monkey_patch():
             # We create a wrapper that swallows extra args to match whatever signature Cognee 0.5.x expects
             # while FORCING our own paths.
             
+            def create_safe_engine(**kwargs):
+                logger.info(f"[PATCH] creating_engine called. Swallowing args: {list(kwargs.keys())}")
+                
                 # --- FIX: Permissions Recursively ---
                 try:
                     import subprocess
