@@ -24,28 +24,25 @@ else:
     llm_key = os.environ["LLM_API_KEY"]
     print(f"[INFO] LLM_API_KEY already set: {llm_key[:10]}...")
 
-    # 2. FORCE OpenAI Provider + HF Endpoint (Unless explicitly overridden to something else valid)
-    # We only do this if we are using the HF Token (which usually starts with hf_)
-    if llm_key.startswith("hf_") or os.getenv("HF_TOKEN"):
-        print("[INFO] Configuring OpenAI Proxy for Hugging Face Inference API...")
-        
-        # Provider must be 'openai' to pass validation
-        os.environ["LLM_PROVIDER"] = "openai" 
-        os.environ["COGNEE_LLM_PROVIDER"] = "openai"
-        
-        # Endpoint must point to HF
-        # FIX: LiteLLM requires 'huggingface/' prefix for models used via HF Inference API
-        model_id = "huggingface/Qwen/Qwen2.5-7B-Instruct"
-        hf_endpoint = f"https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct/v1"
-        
-        os.environ["LLM_ENDPOINT"] = hf_endpoint
-        os.environ["COGNEE_LLM_ENDPOINT"] = hf_endpoint
-        
-        # Model name must be clean (no prefix) for OpenAI provider
-        os.environ["LLM_MODEL"] = model_id
-        os.environ["COGNEE_LLM_MODEL"] = model_id
-        
-        print(f"[INFO] LLM Configured: Provider=openai (HF Proxy), Model={model_id}")
+# 2. FORCE OpenAI Provider + HF Endpoint (Unless explicitly overridden to something else valid)
+if llm_key.startswith("hf_") or os.getenv("HF_TOKEN"):
+    print("[INFO] Configuring OpenAI Proxy for Hugging Face Inference API...")
+    
+    # Provider must be 'openai' to pass validation
+    os.environ["LLM_PROVIDER"] = "openai" 
+    os.environ["COGNEE_LLM_PROVIDER"] = "openai"
+    
+    # FIX: LiteLLM requires 'huggingface/' prefix for models used via HF Inference API
+    # We apply this to both LLM_MODEL and COGNEE_LLM_MODEL
+    model_id = "huggingface/Qwen/Qwen2.5-7B-Instruct"
+    hf_endpoint = f"https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct/v1"
+    
+    os.environ["LLM_ENDPOINT"] = hf_endpoint
+    os.environ["COGNEE_LLM_ENDPOINT"] = hf_endpoint
+    os.environ["LLM_MODEL"] = model_id
+    os.environ["COGNEE_LLM_MODEL"] = model_id
+    
+    print(f"[INFO] LLM Configured: Provider=openai (HF Proxy), Model={model_id}")
 
 # =============================================================================
 # COGNEE PATH CONFIGURATION (AGGRESSIVE)
@@ -167,23 +164,24 @@ def configure_cognee_paths():
     print(f"=" * 80)
     
     # CRITICAL: Fix for IntegrityError & Corrupted Files (Ghost Records)
-    # The error 'UNIQUE constraint failed' or empty graphs often mean metadata is out of sync.
-    # We perform a NUCLEAR CLEANUP once during startup to ensure a clean slate.
+    # The error 'UNIQUE constraint failed' usually means metadata is out of sync.
+    # We perform a CLEAR WIPE of the databases folder on every boot to re-register data safely.
     import shutil
     
     print(f"[INFO] 🧹 Starting Nuclear Cleanup of Cognee artifacts...")
     
-    # 1. Cognee Databases (The Source of Integrity Deadlocks/Ghost Records)
-    # The error 'UNIQUE constraint failed' means metadata is out of sync.
-    # Wiping this folder forces Cognee to re-register EVERYTHING cleanly.
+    # 1. Cognee Databases folder (Source of Deadlocks)
+    # Wiping this folder ensures UNIQUE constraint errors are resolved.
     cognee_db_dir = os.path.join(cognee_root, "databases")
     if os.path.exists(cognee_db_dir):
         try:
             shutil.rmtree(cognee_db_dir)
-            os.makedirs(cognee_db_dir, mode=0o777, exist_ok=True)
-            print(f"[CLEANUP] Wiped Cognee databases folder: {cognee_db_dir}")
+            print(f"[CLEANUP] Wiped {cognee_db_dir} to resolve UNIQUE constraint deadlock.")
         except Exception as e:
             print(f"[WARNING] Could not wipe databases folder: {e}")
+
+    # Re-create the folder so it's ready for Cognee
+    os.makedirs(cognee_db_dir, mode=0o777, exist_ok=True)
 
     # 2. Data Storage (Ingested blobs, Vector DB files, Graph DB files)
     storage_dir = os.path.join(cognee_root, "data_storage")

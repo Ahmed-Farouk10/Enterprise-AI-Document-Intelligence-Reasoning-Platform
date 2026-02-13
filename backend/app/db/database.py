@@ -13,16 +13,18 @@ logger = logging.getLogger(__name__)
 persistent_root = os.getenv("COGNEE_ROOT_DIR") or os.getenv("COGNEE_DATA_ROOT")
 
 if persistent_root and os.path.exists(persistent_root):
-    # Ensure nested user_data directory exists (Separated from Cognee's 'databases' which gets wiped)
-    db_dir = os.path.join(persistent_root, "user_data")
-    os.makedirs(db_dir, exist_ok=True)
-    DATABASE_PATH = os.path.join(db_dir, "app_persistent.db")
+    # Ensure nested user_data directory exists (Separated from Cognee's 'databases' folder which we wipe on boot)
+    persistent_db_dir = os.path.join(persistent_root, "user_data")
+    os.makedirs(persistent_db_dir, exist_ok=True)
+    DATABASE_PATH = os.path.join(persistent_db_dir, "app_persistent.db")
 elif os.path.exists("/data") and os.access("/data", os.W_OK):
     DATABASE_PATH = "/data/docucentric.db"
 else:
     DATABASE_PATH = "./docucentric.db"
 
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATABASE_PATH}")
+# User suggested name for SQLAlchemy
+SQLALCHEMY_DATABASE_URL = DATABASE_URL
 
 # For PostgreSQL in production, use:
 # DATABASE_URL = "postgresql://user:password@localhost/dbname"
