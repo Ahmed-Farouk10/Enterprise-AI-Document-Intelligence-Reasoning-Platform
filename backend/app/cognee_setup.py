@@ -108,10 +108,15 @@ def apply_cognee_monkey_patch():
             from cognee.infrastructure.databases.relational.create_relational_engine import create_relational_engine
             
             # Create a correct engine
+            # FIX: create_relational_engine requires all args even for SQLite
             correct_engine = create_relational_engine(
                 db_path=DB_PATH,
                 db_name="cognee_db",
-                db_provider="sqlite" 
+                db_provider="sqlite",
+                db_host="localhost",   # Dummy val
+                db_port=5432,          # Dummy val
+                db_username="cognee",  # Dummy val
+                db_password="cognee"   # Dummy val
             )
             
             # Monkeypatch the getter to valid engine
