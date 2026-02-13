@@ -406,7 +406,7 @@ async def process_resume_document(text: str, document_id: str, document_type: st
     try:
         resume = await asyncio.wait_for(extract_resume_entities(text), timeout=timeout_seconds)
         dataset_name = f"resume_{document_id}"
-        await _store_and_cognify([resume], dataset_name)
+        await _store_and_cognify([resume], dataset_name, original_text=text)
         return resume
     except Exception as e:
         logger.error(f"Resume pipeline failed: {e}")
@@ -419,7 +419,7 @@ async def process_legal_document(text: str, document_id: str) -> Any:
     try:
         contract = await extract_legal_entities(text)
         dataset_name = f"contract_{document_id}"
-        await _store_and_cognify([contract], dataset_name)
+        await _store_and_cognify([contract], dataset_name, original_text=text)
         return contract
     except Exception as e:
         logger.error(f"Legal pipeline failed: {e}")
@@ -431,7 +431,7 @@ async def process_financial_document(text: str, document_id: str) -> Any:
     try:
         invoice = await extract_financial_entities(text)
         dataset_name = f"invoice_{document_id}"
-        await _store_and_cognify([invoice], dataset_name)
+        await _store_and_cognify([invoice], dataset_name, original_text=text)
         return invoice
     except Exception as e:
         logger.error(f"Financial pipeline failed: {e}")
@@ -443,19 +443,29 @@ async def process_education_document(text: str, document_id: str) -> Any:
     try:
         course = await extract_education_entities(text)
         dataset_name = f"course_{document_id}"
-        await _store_and_cognify([course], dataset_name)
+        await _store_and_cognify([course], dataset_name, original_text=text)
         return course
     except Exception as e:
         logger.error(f"Education pipeline failed: {e}")
         return {"error": str(e)}
 
-async def _store_and_cognify(data_points: List[Any], dataset_name: str):
+async def _store_and_cognify(data_points: List[Any], dataset_name: str, original_text: str = None):
     """Helper to store data and trigger Cognify"""
     try:
         user_uuid = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
         user = User(id=user_uuid)
         
-        logger.info(f"📤 Adding {len(data_points)} data points to Cognee (dataset: {dataset_name})")
+        # CRITICAL: Always add the raw text first to ensure vector index is created
+        # This fixes "TextSummary_text collection not found" error
+        if original_text:
+            logger.info(f"📝 Adding raw text to ensure vector indexing (dataset: {dataset_name})")
+            await cognee.add(
+                data=original_text,
+                dataset_name=dataset_name,
+                user=user
+            )
+
+        logger.info(f"📤 Adding {len(data_points)} structured data points to Cognee (dataset: {dataset_name})")
         await cognee.add(
             data=data_points,
             dataset_name=dataset_name, 
