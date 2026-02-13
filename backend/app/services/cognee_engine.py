@@ -226,7 +226,6 @@ class CogneeEngine:
                 target_user_id = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
                 
                 try:
-                try:
                     # get_user raises EntityNotFoundError if not found (it doesn't return None)
                     existing_user = await get_user(target_user_id)
                     logger.info(f"✅ Verified available user: {target_user_id}")
