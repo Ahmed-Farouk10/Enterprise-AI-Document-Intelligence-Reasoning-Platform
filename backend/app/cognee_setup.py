@@ -32,27 +32,30 @@ if llm_key.startswith("hf_") or os.getenv("HF_TOKEN"):
     os.environ["LLM_PROVIDER"] = "openai" 
     os.environ["COGNEE_LLM_PROVIDER"] = "openai"
     
-    # FIX: Bypass LiteLLM's broken HF integration (410 Gone) by forcing OpenAI protocol
-    # We point the OpenAI client to the new HF Router endpoint
-    hf_router = "https://router.huggingface.co/hf-inference/v1"
+    # FIX: Switching to Google Gemini 2.0 Flash for stability (No 410 Errors)
+    # Using local embeddings (FastEmbed) to avoid dependency on OpenAI for vectors
     
-    # 1. Force Provider to 'openai'
-    os.environ["LLM_PROVIDER"] = "openai" 
-    os.environ["COGNEE_LLM_PROVIDER"] = "openai"
+    # 1. Force Provider to 'gemini'
+    os.environ["LLM_PROVIDER"] = "gemini" 
+    os.environ["COGNEE_LLM_PROVIDER"] = "gemini"
     
-    # 2. Override Endpoint to HF Router
-    os.environ["LLM_ENDPOINT"] = hf_router
-    os.environ["COGNEE_LLM_ENDPOINT"] = hf_router
-    os.environ["LLM_API_BASE"] = hf_router # LiteLLM specific override
-    
-    # 3. Use 'openai/' prefix to force OpenAI protocol in LiteLLM
-    # This prevents it from autoswitching back to the broken 'huggingface' logic
-    model_id = "openai/Qwen/Qwen2.5-7B-Instruct" 
-    
+    # 2. Set Model ID 
+    model_id = "gemini/gemini-2.0-flash"
     os.environ["LLM_MODEL"] = model_id
     os.environ["COGNEE_LLM_MODEL"] = model_id
+
+    # 3. Set API Key (User Provided)
+    # CRITICAL: If env var is missing, use the provided backup key
+    if not os.getenv("LLM_API_KEY"):
+        os.environ["LLM_API_KEY"] = "AIzaSyChLF3hBJXMP2S5WGgYumMrNfZK-cURvZg"
+
+    # 4. Force Local Embeddings (FastEmbed)
+    # This prevents Cognee from crashing if no OpenAI key is present for embeddings
+    os.environ["EMBEDDING_PROVIDER"] = "fastembed"
+    os.environ["COGNEE_EMBEDDING_PROVIDER"] = "fastembed"
+    os.environ["EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"
     
-    print(f"[INFO] LLM Configured: Provider=openai (HF Router via OpenAI protocol), Model={model_id}")
+    print(f"[INFO] LLM Configured: Provider=gemini, Model={model_id}, Embeddings=fastembed")
 
 # =============================================================================
 # COGNEE PATH CONFIGURATION (AGGRESSIVE)

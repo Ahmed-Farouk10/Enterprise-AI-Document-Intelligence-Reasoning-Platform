@@ -21,7 +21,7 @@ os.environ["COGNEE_DB_PATH"] = os.path.join(PERSISTENT_ROOT, "databases")
 # FIX: Stop vanishing chats by forcing the main app DB into the persistent folder
 # Ensure the directory exists
 os.makedirs(os.path.join(PERSISTENT_ROOT, "databases"), exist_ok=True)
-DATABASE_PATH = os.path.join(PERSISTENT_ROOT, "databases", "app_persistent_sessions.db")
+DATABASE_PATH = os.path.join(PERSISTENT_ROOT, "databases", "app_persistent_chat.db")
 
 # Fallback for local dev if not in container
 if not os.path.exists("/app/.cache"):
