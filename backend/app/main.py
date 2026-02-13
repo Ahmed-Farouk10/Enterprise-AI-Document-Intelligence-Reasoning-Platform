@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI):
                     logger.info("application_startup", status="cognee_system_pruned")
                 else:
                     # Fallback for older/different versions causing issues
-                    await cognee.prune()
+                    cognee.prune()
                     logger.info("application_startup", status="cognee_pruned")
             except Exception as e:
                  logger.warning(f"Prune failed (non-critical): {e}")
@@ -206,7 +206,7 @@ async def system_reset():
     """CRITICAL: Prune all data from Cognee. Use with caution."""
     try:
         import cognee
-        await cognee.prune()
+        cognee.prune()
         return {"status": "success", "message": "System pruned. All data removed."}
     except Exception as e:
         return {"status": "error", "message": str(e)}

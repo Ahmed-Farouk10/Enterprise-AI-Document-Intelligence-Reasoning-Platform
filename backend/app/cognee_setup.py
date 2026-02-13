@@ -118,7 +118,11 @@ def apply_cognee_monkey_patch():
                 return create_relational_engine(
                     db_path=DB_PATH,
                     db_name="cognee_db",
-                    db_provider="sqlite"
+                    db_provider="sqlite",
+                    db_host="localhost",
+                    db_port=5432,
+                    db_username="cognee",
+                    db_password="password"
                 )
             
             # Create the singleton instance
