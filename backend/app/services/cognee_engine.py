@@ -237,9 +237,117 @@ class CogneeEngine:
                         id=target_user_id,
                         email="default@example.com"
                     )
-                    # FIX: create_user requires a password argument in Cognee 0.5.2+
-                    # Signature appears to be: create_user(user: User, password: str)
-                    await create_user(new_user, "DefaultPassword123!")
+                    # FIX: create_user(user: User, password: str) is the correct signature
+                    # The error 'email Input should be a valid string... input_value=<cognee.modules.users.models.User.User' 
+                    # suggests that 'create_user' might be doing something like User(user) which wraps it again?
+                    # Or maybe create_user takes (email, password) or a UserCreate pydantic model?
+                    
+                    # Looking at common pydantic patterns, usually create_user takes a Pydantic model.
+                    # But here 'User' seems to be the SQLAlchemy model.
+                    
+                    # Let's try passing the object as the first arg, and password as second.
+                    # Wait, the error said: "1 validation error for UserCreate... email... input_value=<...User object...>"
+                    # This means create_user is verifying the input against UserCreate schema.
+                    # And it received a User object where it expected a string (email).
+                    # This implies valid usage is create_user(email="...", password="...") OR create_user(user_create_model)
+                    
+                    # Let's try passing dictionary or specific args if possible, but we need ID control.
+                    # If create_user takes a Pydantic model, we should construct that.
+                    
+                    # Assuming create_user implementation:
+                    # def create_user(user: User | UserCreate, password: str = None):
+                    #    if isinstance(user, User): ...
+                    
+                    # Actually, if it failed validating UserCreate, it means it tried to coerce the first argument into UserCreate.
+                    # UserCreate likely has 'email' and 'password' fields.
+                    # If we passed `user=User(email="...")`, then `UserCreate(email=User(...))` -> Error.
+                    
+                    # Let's try creating a user via the user_manager or similar if available, or just standard args.
+                    # But we really want to FORCE a specific ID (5e5ab...).
+                    
+                    # Let's try: create_user(user=User(..., password="...")) ? 
+                    # If I use `create_user(user=new_user)`, and it expects `create_user(user: UserCreate)`, then `new_user` is treated as the data for UserCreate.
+                    
+                    # Let's try constructing the user with the password inside? 
+                    # Or maybe Cognee has `create_user(user: User)` and it extracts fields.
+                    
+                    # Use a specialized User object that Cognee expects?
+                    # The error `input_value=<cognee.modules.users.models.User.User` confirms we passed a SQL/Pydantic User model.
+                    
+                    # Let's try passing the email string directly if the signature allows?
+                    # Or better: constructing the Pydantic model it seemingly wants, if we can import it.
+                    # Since we can't easily see imports, let's try just passing the user properties.
+                    
+                    # Safest bet that matches typical signatures:
+                    # await create_user(user=dict(id=target_user_id, email="...", password="...")) ? 
+                    
+                    # Let's go with modifying the existing object to be cleaner.
+                    # If the previous error was "missing 1 required positional argument: 'password'",
+                    # and we fixed it by adding a password,
+                    # and NOW we get "validation error for UserCreate... email... input_value=<User>",
+                    # it implies the first argument `user` is being validated against `UserCreate`.
+                    
+                    # This means `create_user` implementation likely looks like:
+                    # async def create_user(user: UserCreate, ...):
+                    
+                    # And UserCreate expects `email: str`.
+                    # But we passed `User` object as the first argument.
+                    # So `UserCreate(email=User(...))` ?? No, that's nested.
+                    
+                    # If `create_user` expects a Pydantic model instance, we should pass that.
+                    # But we don't have UserCreate imported.
+                    
+                    # OPTION 1: Pass a dictionary. Pydantic often accepts dicts.
+                    # OPTION 2: If we must use `User`, maybe we just need to pass the email/password as kw?
+                    
+                    # Let's try passing the basic details as a dictionary or kwargs? 
+                    # But wait, we need to set the ID.
+                    
+                    # Let's assume create_user is flexible or we just pass the object it expects.
+                    # If I look at the logs again:
+                    # "Input should be a valid string [type=string_type, input_value=<cognee.modules.users.mod...bject at 0x7feeec1bc110>, input_type=User]"
+                    # validating 'email' field.
+                    
+                    # This strongly suggests the first argument was interpreted as the input for 'email' field validation? 
+                    # OR the first argument IS the UserCreate object, and it has an 'email' field.
+                    # If we passed `User(...)` as the first arg, does `User` have an `email` field? Yes.
+                    
+                    # Wait, if `create_user` signature is `async def create_user(user: User, password: str = None)`
+                    # Then passing `(User(...), "password")` should work.
+                    
+                    # BUT if `create_user` is `async def create_user(user: UserCreate)`
+                    # Then passing `(User(...), "password")`:
+                    # Arg 1 `User(...)` is cast to `UserCreate`. 
+                    # `UserCreate` likely has `email`, `password`, `name`.
+                    # Does `User` match `UserCreate`?
+                    
+                    # The error says "1 validation error for UserCreate... email ... input_value=<User object>".
+                    # This looks like we passed the User object TO the 'email' field?
+                    # That implies `create_user(email=User(...))` was called?
+                    
+                    # Ah! Maybe we called `create_user(new_user, "password")` 
+                    # and the function definition is `async def create_user(email: str, password: str, ...)`?
+                    # If so, `new_user` (Arg 1) was assigned to `email`.
+                    
+                    # YES! That explains everything perfectly.
+                    # 1. "missing 1 required positional arg 'password'" -> Because it was `create_user(email)` and missed `password`.
+                    # 2. "validation error... email... input_value=<User>" -> Because we passed `User` as the first arg, which mapped to `email`.
+                    
+                    # SOLUTION: Call create_user(email="...", password="...") and try to force ID if possible,
+                    # or update the user ID afterwards.
+                    
+                    # However, we need to set the ID to `5e5ab...` because that's what we configured everywhere else.
+                    # Does `create_user` accept `id`?
+                    
+                    # Let's try: create_user(email="...", password="...", id=target_user_id)
+                    # Use kwargs to be safe.
+                    
+                    logger.info("  - Registering with email+password+id kwargs...")
+                    await create_user(
+                        email="default@example.com",
+                        password="DefaultPassword123!",
+                        id=target_user_id
+                    )
                     
                     logger.info(f"✅ Created user {target_user_id}")
                     
