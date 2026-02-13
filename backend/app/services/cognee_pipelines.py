@@ -63,20 +63,7 @@ class ECLProcessor:
     
     def __init__(self, config: Optional[PipelineConfig] = None):
         self.config = config or PipelineConfig()
-        
-        # CRITICAL FIX: Ensure Cognee uses the correct data directory for this instance.
-        # This is redundant but necessary if global config was missed or overridden.
-        try:
-            from cognee.shared.utils import set_data_root
-            import os
-            
-            # Use the environment variable if set by cognee_setup, otherwise default to a safe path
-            target_data_root = os.getenv("COGNEE_DATA_ROOT", "/app/.cache/cognee_data")
-            set_data_root(target_data_root)
-            logger.info(f"🛡️ Pipeline forced data root to: {target_data_root}")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to enforce data root in pipeline: {e}")
+        # The data root is now enforced globally via the Nuclear Patch in cognee_setup.py
         
     async def process(
         self, 

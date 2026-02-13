@@ -9,8 +9,15 @@ from sqlalchemy.exc import OperationalError
 logger = logging.getLogger(__name__)
 
 # Database URL - defaults to SQLite for development
-# CRITICAL: On HF Spaces, use /data for persistence
-if os.path.exists("/data") and os.access("/data", os.W_OK):
+# CRITICAL: On HF Spaces, use persistent storage for chat history/sessions
+persistent_root = os.getenv("COGNEE_ROOT_DIR") or os.getenv("COGNEE_DATA_ROOT")
+
+if persistent_root and os.path.exists(persistent_root):
+    # Ensure nested databases directory exists
+    db_dir = os.path.join(persistent_root, "databases")
+    os.makedirs(db_dir, exist_ok=True)
+    DATABASE_PATH = os.path.join(db_dir, "app_main.db")
+elif os.path.exists("/data") and os.access("/data", os.W_OK):
     DATABASE_PATH = "/data/docucentric.db"
 else:
     DATABASE_PATH = "./docucentric.db"

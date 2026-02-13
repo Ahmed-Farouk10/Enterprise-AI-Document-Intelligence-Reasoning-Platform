@@ -24,27 +24,28 @@ else:
     llm_key = os.environ["LLM_API_KEY"]
     print(f"[INFO] LLM_API_KEY already set: {llm_key[:10]}...")
 
-# 2. FORCE OpenAI Provider + HF Endpoint (Unless explicitly overridden to something else valid)
-# We only do this if we are using the HF Token (which usually starts with hf_)
-if llm_key.startswith("hf_") or os.getenv("HF_TOKEN"):
-    print("[INFO] Configuring OpenAI Proxy for Hugging Face Inference API...")
-    
-    # Provider must be 'openai' to pass validation
-    os.environ["LLM_PROVIDER"] = "openai" 
-    os.environ["COGNEE_LLM_PROVIDER"] = "openai"
-    
-    # Endpoint must point to HF
-    model_id = "Qwen/Qwen2.5-7B-Instruct"
-    hf_endpoint = f"https://api-inference.huggingface.co/models/{model_id}/v1"
-    
-    os.environ["LLM_ENDPOINT"] = hf_endpoint
-    os.environ["COGNEE_LLM_ENDPOINT"] = hf_endpoint
-    
-    # Model name must be clean (no prefix) for OpenAI provider
-    os.environ["LLM_MODEL"] = model_id
-    os.environ["COGNEE_LLM_MODEL"] = model_id
-    
-    print(f"[INFO] LLM Configured: Provider=openai (HF Proxy), Model={model_id}")
+    # 2. FORCE OpenAI Provider + HF Endpoint (Unless explicitly overridden to something else valid)
+    # We only do this if we are using the HF Token (which usually starts with hf_)
+    if llm_key.startswith("hf_") or os.getenv("HF_TOKEN"):
+        print("[INFO] Configuring OpenAI Proxy for Hugging Face Inference API...")
+        
+        # Provider must be 'openai' to pass validation
+        os.environ["LLM_PROVIDER"] = "openai" 
+        os.environ["COGNEE_LLM_PROVIDER"] = "openai"
+        
+        # Endpoint must point to HF
+        # FIX: LiteLLM requires 'huggingface/' prefix for models used via HF Inference API
+        model_id = "huggingface/Qwen/Qwen2.5-7B-Instruct"
+        hf_endpoint = f"https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct/v1"
+        
+        os.environ["LLM_ENDPOINT"] = hf_endpoint
+        os.environ["COGNEE_LLM_ENDPOINT"] = hf_endpoint
+        
+        # Model name must be clean (no prefix) for OpenAI provider
+        os.environ["LLM_MODEL"] = model_id
+        os.environ["COGNEE_LLM_MODEL"] = model_id
+        
+        print(f"[INFO] LLM Configured: Provider=openai (HF Proxy), Model={model_id}")
 
 # =============================================================================
 # COGNEE PATH CONFIGURATION (AGGRESSIVE)
@@ -165,6 +166,15 @@ def configure_cognee_paths():
     print(f"Writable: {os.access(cognee_root, os.W_OK)}")
     print(f"=" * 80)
     
+    # CRITICAL: Fix for IntegrityError (Stuck metadata)
+    # If the database exists but is corrupted/half-written from a failed run,
+    # we might need to reset it. For now, we print a warning.
+    cognee_db_path = os.path.join(cognee_root, "databases", "cognee_db.db")
+    if os.path.exists(cognee_db_path) and os.path.getsize(cognee_db_path) < 1024:
+        print(f"[WARNING] Cognee DB seems too small ({os.path.getsize(cognee_db_path)} bytes), potential corruption.")
+        # We don't delete it automatically unless absolutely sure, 
+        # but the user can use this info to prune.
+
     return cognee_root
 
 
@@ -227,15 +237,7 @@ def apply_cognee_monkey_patch():
     os.makedirs = patched_makedirs
     print("[SUCCESS] Global os.makedirs patched to redirect site-packages calls")
     
-    # 4. Extra: Set data root if utility exists (Redundant but safe)
-    try:
-        from cognee.shared.utils import set_data_root
-        set_data_root(target_root)
-        print(f"[SUCCESS] Called cognee.shared.utils.set_data_root({target_root})")
-    except ImportError:
-        pass
-    except Exception as e:
-        print(f"[WARNING] set_data_root failed: {e}")
+    print("[INFO] Nuclear Patch application complete.")
 
 # =============================================================================
 # FORCE PATH CONFIGURATION ON IMPORT
