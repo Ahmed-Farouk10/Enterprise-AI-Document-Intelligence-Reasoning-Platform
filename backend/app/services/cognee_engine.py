@@ -125,31 +125,13 @@ class CogneeEngine:
             cognee.config.embedding_engine = local_embed_engine
             logger.info(f"✅ Forced Custom Embedding Engine (dim={local_embed_engine.get_vector_size()})")
 
-            # 2. LLM (Custom Qwen Wrapper)
-            # This bypasses LLMGateway's default OpenAI behavior for structured output
-            try:
-                from app.services.custom_cognee_llm import CustomCogneeLLMEngine
-                logger.info("Initializing custom Cognee LLM Engine (Local Qwen)...")
-                local_llm_engine = CustomCogneeLLMEngine()
-                
-                # Inject into Cognee config
-                # Cognee 0.5.x uses 'llm_engine' or 'llm_client' depending on version
-                # We set both to be safe
-                cognee.config.llm_engine = local_llm_engine
-                cognee.config.llm_client = local_llm_engine
-                cognee.config.llm_provider = "custom_local"
-                cognee.config.llm_api_key = os.getenv("LLM_API_KEY", "local")
-                
-                logger.info("✅ Forced Custom LLM Engine (Local Qwen for Structured Output)")
-            except Exception as e_llm:
-                logger.error(f"❌ Failed to inject Custom LLM: {e_llm}")
-                # Fallback to config-based, but FORCE proper provider if on HF Spaces
-                if os.getenv("HF_HOME") or os.getenv("HF_TOKEN"):
-                    logger.info("⚠️ Falling back to OpenAI Provider (HF Proxy) for Spaces")
-                    cognee.config.llm_provider = "openai"
-                    cognee.config.llm_model = "Qwen/Qwen2.5-7B-Instruct"
-                    cognee.config.llm_endpoint = f"https://api-inference.huggingface.co/models/{cognee.config.llm_model}/v1"
-                    cognee.config.llm_api_key = os.getenv("HF_TOKEN", "")
+            # 2. LLM Configuration
+            # We respect the configuration from cognee_setup.py (Gemini/Instructor)
+            # The custom injection block has been removed to allow standard providers to work.
+            if os.environ.get("LLM_PROVIDER") == "gemini":
+                logger.info("✅ Using Standard Gemini Provider (configured in setup)")
+            else:
+                 logger.info(f"✅ Using LLM Provider: {os.environ.get('LLM_PROVIDER', 'unknown')}")
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize custom engines: {e}")

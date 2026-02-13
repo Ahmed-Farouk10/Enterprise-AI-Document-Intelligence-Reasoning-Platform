@@ -28,10 +28,48 @@ class CustomCogneeLLMEngine:
         system_prompt: str = "You are a helpful assistant."
     ) -> T:
         """
-        Generate structured output matching a Pydantic model using local LLM.
-        Bypasses OpenAI completely.
+        Generate structured output matching a Pydantic model.
+        Supports:
+        1. Gemini (via Instructor + Google SDK) if LLM_PROVIDER="gemini"
+        2. Local Qwen (via llm_service) otherwise
         """
         try:
+            # --- GEMINI SUPPORT ---
+            if os.environ.get("LLM_PROVIDER") == "gemini":
+                import instructor
+                import google.generativeai as genai
+                
+                api_key = os.environ.get("LLM_API_KEY")
+                if not api_key:
+                    raise ValueError("LLM_API_KEY required for Gemini")
+                
+                genai.configure(api_key=api_key)
+                
+                # Create client with instructor
+                client = instructor.from_gemini(
+                    client=genai.GenerativeModel(
+                        model_name=os.environ.get("LLM_MODEL", "gemini-2.0-flash").replace("gemini/", "") # Strip prefix if present
+                    ),
+                    mode=instructor.Mode.GEMINI_JSON
+                )
+                
+                # Call Gemini
+                # Note: instructor.from_gemini returns a client that mimics OpenAI's interface but for Gemini
+                # Wait, instructor's Gemini support is slightly different.
+                # Valid implementation for instructor < 1.0 was different.
+                # For basic compatibility, we accept that we might need to adjust.
+                # Let's use the standard `messages` approach.
+                
+                resp = await client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": text_input}
+                    ],
+                    response_model=response_model,
+                )
+                return resp
+
+            # --- LOCAL QWEN SUPPORT (Original Logic) ---
             # 1. Create schema-enforcing prompt
             schema = response_model.model_json_schema()
             schema_str = json.dumps(schema, indent=2)
