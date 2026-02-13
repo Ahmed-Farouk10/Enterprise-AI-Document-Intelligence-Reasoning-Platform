@@ -96,6 +96,11 @@ def configure_cognee_paths():
     os.environ["COGNEE_DB_PATH"] = os.path.join(cognee_root, "databases")
     os.environ["COGNEE_DATA_DIR"] = os.path.join(cognee_root, "data")
     
+    # USER SUGGESTED FIX: Explicitly set COGNEE_DATA_ROOT and STORAGE_PATH
+    os.environ["COGNEE_DATA_ROOT"] = os.path.join(cognee_root, "data")
+    os.environ["COGNEE_STORAGE_PATH"] = os.path.join(cognee_root, "data", "storage")
+    print(f"[INFO] COGNEE_DATA_ROOT set to: {os.environ['COGNEE_DATA_ROOT']}")
+    
     # CRITICAL: Disable telemetry to prevent "Permission denied" errors on read-only systems
     os.environ["COGNEE_COLLECT_ANON_USAGE"] = "false"
     
@@ -292,7 +297,26 @@ def apply_cognee_monkey_patch():
         except ImportError:
             print("[WARNING] Could not patch get_file_storage (ImportError)")
         except Exception as e:
-            print(f"[WARNING] Failed to patch get_file_storage: {e}")
+            print(f"[WARNING] Failed to patch save_data_to_file: {e}")
+
+        # Enable DEBUG logging for Cognee internals if on Spaces or requested
+        if os.getenv("HF_HOME") or os.getenv("COGNEE_DEBUG") == "true":
+            try:
+                import logging
+                logging.getLogger("cognee").setLevel(logging.DEBUG)
+                print("[INFO] 🛠️ Cognee DEBUG logging enabled for deep diagnostics")
+            except Exception:
+                pass
+
+        # USER SUGGESTED FIX: Programmatically force data root if utility exists
+        try:
+            from cognee.shared.utils import set_data_root
+            set_data_root(os.path.join(COGNEE_ROOT, "data"))
+            print(f"[SUCCESS] Forced data root via cognee.shared.utils.set_data_root")
+        except ImportError:
+            print("[INFO] cognee.shared.utils.set_data_root not found (version difference?)")
+        except Exception as e:
+            print(f"[WARNING] Failed to call set_data_root: {e}")
 
     except ImportError as e:
         print(f"[WARNING] Could not apply monkey patch (Cognee not yet imported): {e}")

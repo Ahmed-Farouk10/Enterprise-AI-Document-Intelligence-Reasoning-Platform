@@ -62,24 +62,39 @@ async def process_document_background(document_id: str, file_path: Path, mime_ty
                             }
                         )
                         
-                        # Extract stats safely
-                        is_success = False
-                        if hasattr(document_graph, 'success') and document_graph.success: is_success = True
-                        elif isinstance(document_graph, dict) and document_graph.get('success', False): is_success = True
-                        
-                        if is_success:
-                           def get_val(obj, key, default):
-                               if isinstance(obj, dict): return obj.get(key, default)
-                               return getattr(obj, key, default)
+                            is_success = False
+                            error_msg = None
+                            
+                            # Check success and extract error message if present
+                            if hasattr(document_graph, 'success'): 
+                                is_success = document_graph.success
+                                error_msg = getattr(document_graph, 'error_message', None)
+                            elif isinstance(document_graph, dict):
+                                # Check success OR status (for pipelines)
+                                is_success = document_graph.get('success', False) or (document_graph.get('status') in ['completed', 'partial_success'])
+                                # Check for 'error' (pipelines) or 'error_message' (engine)
+                                error_msg = document_graph.get('error') or document_graph.get('error_message')
+                            
+                            if is_success:
+                               def get_val(obj, key, default):
+                                   if isinstance(obj, dict): return obj.get(key, default)
+                                   return getattr(obj, key, default)
 
-                           document.extra_data = {
-                                "graph_stats": {
-                                    "entity_count": get_val(document_graph, "entity_count", 0),
-                                    "document_type": get_val(document_graph, "document_type", "unknown"),
-                                    "dataset_name": get_val(document_graph, "dataset_name", ""),
-                                    "entities": get_val(document_graph, "entities", {})
-                                }
-                           }
+                               extra_data = {
+                                    "graph_stats": {
+                                        "entity_count": get_val(document_graph, "entity_count", 0),
+                                        "document_type": get_val(document_graph, "document_type", "unknown"),
+                                        "dataset_name": get_val(document_graph, "dataset_name", ""),
+                                        "entities": get_val(document_graph, "entities", {})
+                                    }
+                               }
+                               
+                               # Store warning if graph failed but ingestion "succeeded"
+                               if error_msg:
+                                   extra_data["cognee_warning"] = str(error_msg)
+                                   logger.warning(f"⚠️ Partial success for {document_id}: {error_msg}")
+                               
+                               document.extra_data = extra_data
                     
                     except Exception as cognee_error:
                          logger.error(f"⚠️ Cognee failed: {cognee_error}")

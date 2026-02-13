@@ -409,6 +409,7 @@ class CogneeEngine:
                 logger.error(f"❌ Cognee add() failed: {add_error}")
                 raise
             # 2. Build knowledge graph with timeout (increased for HF Spaces)
+            graph_error = None
             try:
                 logger.info(f"🔨 Building knowledge graph for {dataset_name} (this may take several minutes)...")
                 await asyncio.wait_for(
@@ -432,9 +433,10 @@ class CogneeEngine:
                 logger.info(f"✅ Memory enrichment complete for {dataset_name}")
                 
             except asyncio.TimeoutError:
+                graph_error = "Cognify/Memify timed out - graph incomplete"
                 logger.error(f"⏱️ Cognee graph operations timed out after 600s/300s for {dataset_name}")
-                # We don't raise here, let it proceed to stats so user sees whatever was finished
             except Exception as e:
+                graph_error = f"Cognify failed: {str(e)}"
                 logger.error(f"❌ Cognee graph operations failed: {e}")
             
             # Get graph statistics from Neo4j
@@ -443,11 +445,12 @@ class CogneeEngine:
             logger.info(f"✅ Cognee ingestion complete: {stats.get('entity_count', 0)} entities, {stats.get('relationship_count', 0)} relationships")
             
             return GraphIngestionResult(
-                success=True,
+                success=True if not graph_error else False, # Mark as failed/partial if graph failed
                 entity_count=stats.get("entity_count", 0),
                 relationship_count=stats.get("relationship_count", 0),
                 domain_type=domain,
-                dataset_name=dataset_name
+                dataset_name=dataset_name,
+                error_message=graph_error # Pass the specific graph error
             )
             
         except Exception as e:

@@ -130,6 +130,9 @@ class ECLProcessor:
 
             # STEP 4: COGNIFY (Graph Construction)
             logger.info(f" [COGNIFY] Building Knowledge Graph for dataset: '{dataset_name}'...")
+            graph_status = "completed"
+            graph_error = None
+            
             try:
                 # Use extended timeout for specific environments
                 await asyncio.wait_for(
@@ -138,30 +141,35 @@ class ECLProcessor:
                 )
                 logger.info(f" ECL Pipeline success: Values persisted to Graph & Vector Store")
             except asyncio.TimeoutError:
+                graph_status = "partial_success"
+                graph_error = "Cognify timed out - graph incomplete"
                 logger.warning(f"Cognify timed out after {self.config.cognify_timeout}s. Data is saved but graph relationships may be incomplete.")
             except Exception as e:
                 # CRITICAL HANDLER for "TextSummary_text collection not found"
                 if "TextSummary" in str(e) or "collection not found" in str(e):
                     logger.warning(f" Vector store issue detected: {e}. Attempting recovery...")
-                    # This often means the raw text node wasn't created properly.
-                    # We supress this error because the structured data MIGHT still be there.
-                    # In a production ECL, we'd dead-letter queue this.
+                    graph_status = "partial_success"
+                    graph_error = f"Vector store issue: {str(e)}"
                 else:
                     logger.error(f" Cognify failed: {e}")
+                    graph_status = "partial_success"
+                    graph_error = f"Cognify failed: {str(e)}"
                     # Don't re-raise if we want to return partial results (structured data extract was successful)
             
             # STEP 5: SELF-IMPROVEMENT (Memify Registration)
-            try:
-                from app.services.cognee_background import memify_service
-                memify_service.register_dataset(dataset_name)
-                logger.info(f"Registered {dataset_name} for Memify maintenance")
-            except ImportError:
-                pass
+            if graph_status == "completed":
+                try:
+                    from app.services.cognee_background import memify_service
+                    memify_service.register_dataset(dataset_name)
+                    logger.info(f"Registered {dataset_name} for Memify maintenance")
+                except ImportError:
+                    pass
 
             return {
-                "status": "completed",
+                "status": graph_status,
                 "dataset": dataset_name,
-                "data": structured_data
+                "data": structured_data,
+                "error": graph_error
             }
 
         except Exception as e:
