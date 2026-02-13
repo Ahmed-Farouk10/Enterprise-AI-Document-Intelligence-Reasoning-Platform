@@ -131,71 +131,16 @@ def configure_cognee_paths():
     return cognee_root
 
 
-# Execute configuration immediately on import
+# =============================================================================
+# FORCE PATH CONFIGURATION & PATCHING ON IMPORT
+# =============================================================================
+# 1. Configure paths (Environment Variables)
 COGNEE_ROOT = configure_cognee_paths()
 
-
-# =============================================================================
-# MONKEY PATCH: Override Cognee's internal path resolution
-# =============================================================================
-def apply_cognee_monkey_patch():
-    """
-    Aggressively patch Cognee's path resolution at import time.
-    This runs AFTER environment variables are set but BEFORE Cognee initializes.
-    """
-    try:
-        # Import Cognee's path utilities
-        import cognee
-        from cognee.shared import utils as cognee_utils
-        
-        # Override the get_system_root_directory function if it exists
-        if hasattr(cognee_utils, 'get_system_root_directory'):
-            def patched_get_system_root_directory(*args, **kwargs):
-                """Force return our configured path"""
-                return COGNEE_ROOT
-            
-            cognee_utils.get_system_root_directory = patched_get_system_root_directory
-            print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_system_root_directory")
-        
-        # CRITICAL FIX: Patch get_anonymous_id to prevent write permission errors
-        # We patch BOTH the utils module and the logging_utils module if accessible
-        static_anon_id = "hf-spaces-static-anon-id"
-        
-        def patched_get_anonymous_id():
-            return static_anon_id
-            
-        if hasattr(cognee_utils, 'get_anonymous_id'):
-            cognee_utils.get_anonymous_id = patched_get_anonymous_id
-            print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_anonymous_id")
-
-        # Try to patch logging_utils directly as that's where the error comes from
-        try:
-            from cognee.shared import logging_utils
-            if hasattr(logging_utils, 'get_anonymous_id'):
-                logging_utils.get_anonymous_id = patched_get_anonymous_id
-                print(f"[SUCCESS] Monkey-patched cognee.shared.logging_utils.get_anonymous_id")
-                
-            # Also patch the file path variable if it exists
-            if hasattr(logging_utils, 'ANONYMOUS_ID_PATH'):
-                logging_utils.ANONYMOUS_ID_PATH = os.path.join(COGNEE_ROOT, ".anon_id")
-                
-        except ImportError:
-            print("[WARNING] Could not import cognee.shared.logging_utils to patch it directly")
-
-        # Disable Kuzu/Neo4j checks if possible by mocking
-        # (Optional, but might help with the "Neo4j unavailable" noise)
-
-    except ImportError as e:
-        print(f"[WARNING] Could not apply monkey patch (Cognee not yet imported): {e}")
-    except Exception as e:
-        print(f"[WARNING] Monkey patch failed: {e}")
-
-
-# =============================================================================
-# DISABLE COGNEE ACCESS CONTROL FOR LEGACY DATA
-# =============================================================================
-os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
-
+# 2. Apply Runtime Patches (Monkey Patching)
+# We must do this immediately, otherwise early imports might cache the wrong values
+print("[INFO] Applying Cognee runtime patches...")
+apply_cognee_monkey_patch()
 
 # =============================================================================
 # VERIFICATION
@@ -205,9 +150,6 @@ def verify_cognee_setup():
     try:
         import cognee
         print(f"[SUCCESS] Cognee {cognee.__version__} imported successfully")
-        
-        # Try to apply patches after import
-        apply_cognee_monkey_patch()
         
         # Check if database directory is accessible
         db_path = os.path.join(COGNEE_ROOT, "databases")
