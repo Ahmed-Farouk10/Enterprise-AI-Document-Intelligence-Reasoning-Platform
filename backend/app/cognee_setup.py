@@ -173,131 +173,24 @@ def configure_cognee_paths():
 # =============================================================================
 def apply_cognee_monkey_patch():
     """
-    Aggressively patch Cognee's path resolution at import time.
-    This runs AFTER environment variables are set but BEFORE Cognee initializes.
-    """
-    try:
-        # Import Cognee's path utilities
-        import cognee
-        from cognee.shared import utils as cognee_utils
-        
-        # Override the get_system_root_directory function if it exists
-        if hasattr(cognee_utils, 'get_system_root_directory'):
-            def patched_get_system_root_directory(*args, **kwargs):
-                """Force return our configured path"""
-                return COGNEE_ROOT
-            
-            cognee_utils.get_system_root_directory = patched_get_system_root_directory
-            print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_system_root_directory")
-        
-        # CRITICAL FIX: Patch get_anonymous_id to prevent write permission errors
-        # We patch BOTH the utils module and the logging_utils module if accessible
-        static_anon_id = "hf-spaces-static-anon-id"
-        
-        def patched_get_anonymous_id():
-            return static_anon_id
-            
-        if hasattr(cognee_utils, 'get_anonymous_id'):
-            cognee_utils.get_anonymous_id = patched_get_anonymous_id
-            print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_anonymous_id")
-
-        # Try to patch logging_utils directly as that's where the error comes from
-        try:
-            from cognee.shared import logging_utils
-            if hasattr(logging_utils, 'get_anonymous_id'):
-                logging_utils.get_anonymous_id = patched_get_anonymous_id
-                print(f"[SUCCESS] Monkey-patched cognee.shared.logging_utils.get_anonymous_id")
+                # Force storage path to be inside our writable COGNEE_ROOT/data
+                target_path = os.path.join(COGNEE_ROOT, "data")
                 
-            # Also patch the file path variable if it exists
-            if hasattr(logging_utils, 'ANONYMOUS_ID_PATH'):
-                logging_utils.ANONYMOUS_ID_PATH = os.path.join(COGNEE_ROOT, ".anon_id")
+                # If path is None or looks like a system path, override it
+                if not path or "site-packages" in str(path):
+                    print(f"[PATCH] LocalFileStorage.__init__: Redirecting {path} to {target_path}")
+                    path = target_path
                 
-        except ImportError:
-            pass
-
-        # CRITICAL FIX: Force Kuzu to respect our writable path
-        try:
-            from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
-            # We patch the class or the config it uses.
-            # KuzuAdapter typically takes graph_db_url or similar in init.
-            # But let's verify if we can intercept the default if it uses os.getcwd()
+                # Call original init with correct path
+                LocalFileStorage._original_init(self, path)
             
-            # Alternative: Patch the config if KuzuAdapter reads from it
-            try:
-                from cognee.infrastructure.databases.graph import config as graph_config
-                if hasattr(graph_config, 'graph_db_url'):
-                    print(f"[DEBUG] Original graph_db_url: {graph_config.graph_db_url}")
-                    # This might be a string literal, so patching it might not work if already imported elsewhere.
-            except ImportError:
-                pass
-        except ImportError:
-            pass
+            LocalFileStorage.__init__ = patched_init
+            print(f"[SUCCESS] Monkey-patched LocalFileStorage.__init__")
             
-        # CRITICAL FIX: Skip LLM connection test on HF Spaces to avoid startup blocks
-        # We do this UNCONDITIONALLY if on Spaces, as the test is flaky/slow even with valid tokens
-        if os.getenv("HF_HOME") or os.getenv("SPACE_ID") or os.getenv("COGNEE_SKIP_LLM_TEST") == "true":
-            try:
-                from cognee.infrastructure.llm import utils as llm_utils
-                
-                async def _noop_llm_test():
-                    print("⚡ [PATCH] Skipping LLM connection test (HF Spaces Optimization)")
-                    return True
-                    
-                llm_utils.test_llm_connection = _noop_llm_test
-                print(f"[SUCCESS] Monkey-patched cognee.infrastructure.llm.utils.test_llm_connection (SKIPPED)")
-            except ImportError:
-                print("[WARNING] Could not patch test_llm_connection (ImportError)")
-
-        # CRITICAL FIX: Patch save_data_to_file's internal data directory
-        try:
-            from cognee.modules.ingestion import save_data_to_file as save_data_module
-            # Check if processing has data_root_directory
-            if hasattr(save_data_module, 'data_root_directory'):
-                 save_data_module.data_root_directory = os.path.join(COGNEE_ROOT, "data")
-                 print(f"[SUCCESS] Monkey-patched cognee.modules.ingestion.save_data_to_file.data_root_directory")
-            
-            # Also check get_data_root_directory in utils
-            if hasattr(cognee_utils, 'get_data_root_directory'):
-                 def patched_get_data_root_directory(*args, **kwargs):
-                     return os.path.join(COGNEE_ROOT, "data")
-                 cognee_utils.get_data_root_directory = patched_get_data_root_directory
-                 print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_data_root_directory")
-
         except ImportError:
-            print("[WARNING] Could not patch save_data_to_file (ImportError)")
+            print("[WARNING] Could not patch LocalFileStorage.__init__ (ImportError)")
         except Exception as e:
-            print(f"[WARNING] Failed to patch save_data_to_file: {e}")
-
-        # CRITICAL FIX: Patch get_file_storage to force writable directory
-        try:
-            from cognee.infrastructure.files.storage import LocalFileStorage
-            storage_module = __import__('cognee.infrastructure.files.storage', fromlist=['get_file_storage'])
-            
-            if hasattr(storage_module, 'get_file_storage'):
-                original_get_file_storage = storage_module.get_file_storage
-                
-                def patched_get_file_storage(storage_path=None):
-                    # Force storage path to be inside our writable COGNEE_ROOT/data
-                    # We ignore the passed storage_path if it looks like a system path
-                    target_path = os.path.join(COGNEE_ROOT, "data")
-                    if storage_path and "site-packages" in str(storage_path):
-                         print(f"[PATCH] Redirecting storage from {storage_path} to {target_path}")
-                         return LocalFileStorage(target_path)
-                    
-                    # Also redirect if None or empty
-                    if not storage_path:
-                        print(f"[PATCH] Redirecting empty storage path to {target_path}")
-                        return LocalFileStorage(target_path)
-                        
-                    return original_get_file_storage(storage_path)
-                
-                storage_module.get_file_storage = patched_get_file_storage
-                print(f"[SUCCESS] Monkey-patched cognee.infrastructure.files.storage.get_file_storage")
-                
-        except ImportError:
-            print("[WARNING] Could not patch get_file_storage (ImportError)")
-        except Exception as e:
-            print(f"[WARNING] Failed to patch save_data_to_file: {e}")
+            print(f"[WARNING] Failed to patch LocalFileStorage.__init__: {e}")
 
         # Enable DEBUG logging for Cognee internals if on Spaces or requested
         if os.getenv("HF_HOME") or os.getenv("COGNEE_DEBUG") == "true":
@@ -314,15 +207,14 @@ def apply_cognee_monkey_patch():
             set_data_root(os.path.join(COGNEE_ROOT, "data"))
             print(f"[SUCCESS] Forced data root via cognee.shared.utils.set_data_root")
         except ImportError:
-            print("[INFO] cognee.shared.utils.set_data_root not found (version difference?)")
+            print("[INFO] cognee.shared.utils.set_data_root not found")
         except Exception as e:
             print(f"[WARNING] Failed to call set_data_root: {e}")
 
     except ImportError as e:
         print(f"[WARNING] Could not apply monkey patch (Cognee not yet imported): {e}")
     except Exception as e:
-        print(f"[WARNING] Monkey patch failed: {e}")
-
+        print(f"[WARNING] Monkey patch failed: {e}") 
 
 # =============================================================================
 # FORCE PATH CONFIGURATION ON IMPORT
