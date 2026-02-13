@@ -229,8 +229,7 @@ class CogneeEngine:
                     await create_user(
                         user=User(
                             id=target_user_id,
-                            email="default@example.com",
-                            name="Default User"
+                            email="default@example.com"
                         )
                     )
                     logger.info(f"✅ Created user {target_user_id}")
@@ -374,31 +373,34 @@ class CogneeEngine:
             except Exception as add_error:
                 logger.error(f"❌ Cognee add() failed: {add_error}")
                 raise
-            
-            # Build knowledge graph with timeout
-            logger.info(f"🔨 Building knowledge graph for {dataset_name}...")
+            # 2. Build knowledge graph with timeout (increased for HF Spaces)
             try:
-                # Set a reasonable timeout for graph building (increased for HF Spaces)
+                logger.info(f"🔨 Building knowledge graph for {dataset_name} (this may take several minutes)...")
                 await asyncio.wait_for(
                     cognee.cognify(
                         datasets=[dataset_name],
                         user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
                     ),
-                    timeout=300.0  # Increased from 90s
+                    timeout=600.0  # Increased for limited CPU
                 )
-                logger.info(f"✅ Knowledge graph built successfully for {dataset_name}")
+                logger.info(f"✅ Knowledge graph built successfully (Datasets: {dataset_name})")
                 
                 # 3. Memory Enrichment (memify) - Derives new facts and relationships
                 logger.info(f"🧠 Enriching memory graph (memify) for {dataset_name}...")
-                await cognee.memify(
-                    datasets=[dataset_name],
-                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                await asyncio.wait_for(
+                    cognee.memify(
+                        datasets=[dataset_name],
+                        user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                    ),
+                    timeout=300.0
                 )
                 logger.info(f"✅ Memory enrichment complete for {dataset_name}")
                 
             except asyncio.TimeoutError:
-                logger.error(f"⏱️ Cognee graph building/enrichure timed out after 300s for {dataset_name}")
-                raise RuntimeError("Cognee graph building timed out - document may be too large or LLM is slow")
+                logger.error(f"⏱️ Cognee graph operations timed out after 600s/300s for {dataset_name}")
+                # We don't raise here, let it proceed to stats so user sees whatever was finished
+            except Exception as e:
+                logger.error(f"❌ Cognee graph operations failed: {e}")
             
             # Get graph statistics from Neo4j
             stats = await self._get_graph_stats_from_neo4j(document_id)

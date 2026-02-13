@@ -452,16 +452,26 @@ async def process_education_document(text: str, document_id: str) -> Any:
 async def _store_and_cognify(data_points: List[Any], dataset_name: str):
     """Helper to store data and trigger Cognify"""
     try:
-        # FIX: Use public API instead of internal function to avoid signature mismatches
+        user_uuid = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
+        user = User(id=user_uuid)
+        
+        logger.info(f"📤 Adding {len(data_points)} data points to Cognee (dataset: {dataset_name})")
         await cognee.add(
             data=data_points,
             dataset_name=dataset_name, 
-            user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+            user=user
         )
-        await cognee.cognify(datasets=[dataset_name], user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID)))
-        logger.info(f"✅ Data stored & cognified for {dataset_name}")
+        
+        logger.info(f"🔨 Building knowledge graph via Cognify (dataset: {dataset_name})...")
+        # Increase timeout for complex graph operations on CPU
+        try:
+            await asyncio.wait_for(cognee.cognify(datasets=[dataset_name], user=user), timeout=600.0)
+            logger.info(f"✅ Data stored & cognified successfully for {dataset_name}")
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️ Cognify timed out for {dataset_name}, but data was added. Search may be ready.")
+            
     except Exception as e:
-        logger.error(f"Storage/Cognify failed for {dataset_name}: {e}")
+        logger.error(f"❌ Storage/Cognify failed for {dataset_name}: {e}", exc_info=True)
 
 async def process_generic_document(text: str, document_id: str, document_type: str = "document") -> Dict[str, Any]:
     """Generic fall-back pipeline"""

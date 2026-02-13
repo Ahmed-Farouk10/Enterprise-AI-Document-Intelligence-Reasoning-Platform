@@ -44,7 +44,8 @@ class ResumeRetriever:
             # This searches both vector embeddings and graph relationships
             search_results = await cognee.search(
                 query_text=query,
-                search_type=SearchType.SUMMARIES
+                search_type=SearchType.SUMMARIES,
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
             )
             
             # Cognee returns generic results, we need to format them
@@ -77,7 +78,8 @@ class ResumeRetriever:
             # We search for "work experience" to get relevant nodes
             results = await cognee.search(
                 query_text="work experience history jobs",
-                search_type=SearchType.SUMMARIES
+                search_type=SearchType.SUMMARIES,
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
             )
             
             # 2. Parse results into a list of work periods
@@ -126,7 +128,8 @@ class ResumeRetriever:
             # 1. Retrieve candidate profile (Formatted text of skills and experience)
             results = await cognee.search(
                 query_text="skills experience qualifications",
-                search_type=SearchType.SUMMARIES
+                search_type=SearchType.SUMMARIES,
+                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
             )
             
             candidate_profile = "\n".join([getattr(r, 'text', str(r)) for r in results[:10]])
