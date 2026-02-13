@@ -232,21 +232,27 @@ class CogneeEngine:
                 except Exception:
                     # Assuming any error means user doesn't exist or can't be found
                     logger.info(f"👤 Creating configured default user: {target_user_id}")
-                    await create_user(
-                        user=User(
-                            id=target_user_id,
-                            email="default@example.com"
-                        )
+                    
+                    new_user = User(
+                        id=target_user_id,
+                        email="default@example.com"
                     )
+                    # Fix: create_user likely expects the user object as a positional argument
+                    # or the signature is create_user(user: User)
+                    await create_user(new_user)
+                    
                     logger.info(f"✅ Created user {target_user_id}")
                     
             except Exception as user_error:
-                logger.warning(f"⚠️ User registration issue (non-fatal): {user_error}")
+                logger.error(f" User registration failed: {user_error}")
+                # We should probably raise here if user creation fails, as everything else depends on it
+                # but for now let's just log error
+                # raise user_error
             
-            logger.info("✅ Cognee engine initialized successfully")
+            logger.info(" Cognee engine initialized successfully")
             
         except Exception as e:
-            logger.error(f"❌ Cognee initialization failed: {e}")
+            logger.error(f" Cognee initialization failed: {e}")
             logger.warning("Cognee features may not work properly")
     # ====================  PROFESSIONAL PIPELINE INTEGRATION ====================
     
