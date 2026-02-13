@@ -112,17 +112,13 @@ def apply_cognee_monkey_patch():
             # while FORCING our own paths.
             
             def create_safe_engine(**kwargs):
-                logger.info(f"[PATCH] creating_engine called with: {kwargs.keys()}")
+                logger.info(f"[PATCH] creating_engine called. Swallowing args: {list(kwargs.keys())}")
                 # We ignore whatever path/provider they passed and force ours
+                # Simplified args for SQLite to avoid 'unexpected keyword argument' errors
                 return create_relational_engine(
                     db_path=DB_PATH,
                     db_name="cognee_db",
-                    db_provider="sqlite",
-                    db_host="localhost",   # Helper args to satisfy signature
-                    db_port=5432,
-                    db_username="cognee",
-                    db_password="cognee",
-                    db_ssl_mode="disable"  # Add SSL mode just in case
+                    db_provider="sqlite"
                 )
             
             # Create the singleton instance
@@ -131,16 +127,22 @@ def apply_cognee_monkey_patch():
             # Monkeypatch the getter to return our correct engine
             import cognee.infrastructure.databases.relational as rel_module
             
+            # 1. Patch the module-level singleton if it exists
             if hasattr(rel_module, "relational_engine"):
                 rel_module.relational_engine = correct_engine
                 logger.info("[PATCH] Replaced cached relational_engine singleton.")
-                
-            # Also patch the function itself
+
+            # 2. Patch the get_relational_engine function
             def patched_get_engine():
                 return correct_engine
                 
             rel_module.get_relational_engine = patched_get_engine
             logger.info("[PATCH] Monkey-patched get_relational_engine().")
+
+             # 3. Aggressive: Patch the create_relational_engine in the module itself
+             # This ensures that even if something imports it directly, it gets our wrapper
+            rel_module.create_relational_engine = create_safe_engine
+            logger.info("[PATCH] Monkey-patched create_relational_engine factory.")
             
         except Exception as e:
             logger.warning(f"[WARNING] Could not patch engine factory: {e}")

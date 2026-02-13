@@ -298,41 +298,34 @@ class CogneeEngine:
             )
             
             # Format response based on result type
-            if hasattr(result, 'person'):  # Resume object
-                from app.models.cognee_models import Resume
-                resume: Resume = result
-                
-                logger.info(
-                    f"✅ Resume processed: {resume.person.name}, "
-                    f"{len(resume.work_history)} positions, "
-                    f"{len(resume.skills)} skills"
-                )
-                
-                return {
-                    "success": True,
-                    "document_type": "resume",
-                    "entity_count": (
-                        1 +  # Person
-                        len(resume.work_history) +
-                        len(resume.education) +
-                        len(resume.skills)
-                    ),
-                    "entities": {
-                        "person": resume.person.name,
-                        "positions": len(resume.work_history),
-                        "degrees": len(resume.education),
-                        "skills": len(resume.skills)
-                    },
-                    "dataset_name": f"resume_{document_id}"
-                }
-            else:  # Generic document
-                logger.info(f"✅ Document processed: {document_type}")
-                
-                return {
-                    "success": True,
-                    "document_type": document_type,
-                    "dataset_name": f"{document_type}_{document_id}"
-                }
+            # The result is now a PipelineResult object (standardized)
+            
+            if result.success:
+                if result.document_type == "resume":
+                    # For resume, we still return the stats structure expected by the frontend
+                    # But we derive it from the standardized result
+                    return {
+                        "success": True,
+                        "document_type": "resume",
+                        "entity_count": (
+                            result.entities.get("positions", 0) + 
+                            result.entities.get("degrees", 0) + 
+                            result.entities.get("skills", 0) + 1
+                        ),
+                        "entities": result.entities,
+                        "dataset_name": result.dataset
+                    }
+                else:
+                    # Generic or other types
+                    return {
+                        "success": True,
+                        "document_type": result.document_type,
+                        "dataset_name": result.dataset,
+                        "status": result.status
+                    }
+            else:
+                # Handle failure case
+                raise Exception(result.error or "Unknown pipeline error")
                 
         except Exception as e:
             logger.error(f"❌ Professional ingestion failed: {e}", exc_info=True)

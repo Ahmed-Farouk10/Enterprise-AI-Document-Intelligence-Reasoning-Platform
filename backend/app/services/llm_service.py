@@ -213,8 +213,12 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
 
     def _ensure_loaded(self) -> None:
         """Lazy loading wrapper"""
-        if self.model is None:
+        if self.model is None and "gemini" not in self.model_name.lower():
             self.load_model()
+        elif "gemini" in self.model_name.lower():
+            # Gemini doesn't need "loading" but we can check the key
+            if not os.getenv("GOOGLE_API_KEY") and not os.getenv("LLM_API_KEY"):
+                 logger.warning("⚠️ Gemini selected but NO API KEY found (GOOGLE_API_KEY or LLM_API_KEY)")
 
     def warmup(self) -> None:
         """Eager loading for production deployment"""
@@ -257,6 +261,73 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             self._failure_count = 0
             self._circuit_open = False
             logger.info("✅ Circuit Breaker RESET: Service healthy")
+
+    def _generate_via_gemini(
+        self,
+        prompt: Any,
+        max_tokens: int = 1024,
+        temperature: float = 0.3,
+        top_p: float = 0.9
+    ) -> str:
+        """
+        Generate using Google's Gemini API.
+        """
+        self._check_circuit()
+        try:
+            import google.generativeai as genai
+            
+            # Use appropriate API key
+            api_key = os.getenv("GUI_GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("LLM_API_KEY")
+            if not api_key:
+                 raise ValueError("No API Key found for Gemini")
+                 
+            genai.configure(api_key=api_key)
+            
+            # Map full model name "gemini/gemini-2.0-flash" -> "gemini-2.0-flash" if needed
+            # But "gemini/..." format is usually for LiteLLM/Instructor.
+            # google.generativeai expects "gemini-1.5-flash" etc.
+            model_name = self.model_name
+            if "/" in model_name:
+                model_name = model_name.split("/")[-1]
+            
+            # Fallback for weird names
+            if "gemini" not in model_name.lower():
+                model_name = "gemini-1.5-flash"
+
+            model = genai.GenerativeModel(model_name)
+            
+            generation_config = genai.types.GenerationConfig(
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p
+            )
+            
+            # Handle list of messages vs string
+            text_prompt = ""
+            if isinstance(prompt, list):
+                # Naive conversion of chat history to string for now 
+                # (or use standard chat history if we want to be fancy, but simple string is safer)
+                for p in prompt:
+                     role = p.get('role', 'user')
+                     content = p.get('content', '')
+                     text_prompt += f"{role.upper()}: {content}\n"
+                text_prompt += "ASSISTANT:"
+            else:
+                text_prompt = str(prompt)
+
+            response = model.generate_content(
+                text_prompt,
+                generation_config=generation_config
+            )
+            
+            self._record_success()
+            return response.text
+            
+        except Exception as e:
+            self._record_failure()
+            logger.error(f"Gemini API failed: {e}")
+            return f"Error using Gemini API: {str(e)}"
+
 
     def _generate_via_inference_api(
         self,
@@ -598,8 +669,11 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
 
         self._ensure_loaded()
         
-        # If model not loaded (HF Spaces), use Inference API
+        # If model not loaded (HF Spaces), use Inference API OR Gemini
         if self.model is None:
+            if "gemini" in self.model_name.lower():
+                return self._generate_via_gemini(prompt, max_tokens, temperature, top_p)
+            
             logger.info("Using HuggingFace Inference API with chat completions")
             return self._generate_via_inference_api(prompt, max_tokens, temperature, top_p)
         
@@ -658,6 +732,14 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
 
         # Fallback to Inference API if model not loaded
         if self.model is None:
+            if "gemini" in self.model_name.lower():
+                # Simple fallback to non-streaming for Gemini for now (or implement streaming later)
+                yield "[STREAM_START]\n"
+                full_text = self._generate_via_gemini(messages, max_new_tokens, temperature)
+                yield full_text
+                yield "\n[STREAM_END]"
+                return
+
             logger.info("Using HuggingFace Inference API for streaming")
             yield from self._generate_via_inference_api_stream(
                 prompt=messages,

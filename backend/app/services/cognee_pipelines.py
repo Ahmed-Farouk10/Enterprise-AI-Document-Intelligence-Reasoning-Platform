@@ -537,84 +537,176 @@ async def extract_education_entities(text: str) -> 'CourseMaterial':
         logger.error(f"Education extraction failed: {e}")
         raise
 
+# ==================== STANDARDIZED RESPONSES ====================
+
+class PipelineResult(BaseModel):
+    """Standardized result for all processing pipelines"""
+    success: bool
+    dataset: str
+    document_type: str
+    data: Optional[Any] = None  # Structured extraction (Resume, Contract, etc.)
+    entities: Optional[Dict[str, Any]] = None  # Summary of extracted entities
+    error: Optional[str] = None
+    status: str = "completed"
+
 # ==================== CUSTOM PIPELINES (EXPANDED) ====================
 
-async def process_resume_document(text: str, document_id: str, document_type: str = "resume", timeout_seconds: int = 120) -> Any:
+async def process_resume_document(text: str, document_id: str, document_type: str = "resume", timeout_seconds: int = 120) -> PipelineResult:
     """Direct Resume Processing Pipeline"""
     if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
     
     try:
+        # extraction task
+        resume_data = await extract_resume_entities(text)
+        
         # Use ECL Processor
         result = await default_ecl.process(
             doc_id=document_id,
             text_content=text,
             metadata={"type": "resume"},
-            extraction_task=extract_resume_entities(text),
+            extraction_task=resume_data,
             dataset_name_prefix="resume"
         )
-        return result["data"]
+        
+        # Calculate entity stats for the result
+        entity_summary = {
+            "person": resume_data.person.name if resume_data.person else "Unknown",
+            "positions": len(resume_data.work_history),
+            "degrees": len(resume_data.education),
+            "skills": len(resume_data.skills)
+        }
+        
+        return PipelineResult(
+            success=True,
+            dataset=result["dataset"],
+            document_type="resume",
+            data=resume_data,
+            entities=entity_summary,
+            status=result["status"]
+        )
     except Exception as e:
         logger.error(f"Resume pipeline failed: {e}")
-        from app.models.cognee_models import Resume, Person
-        return Resume(person=Person(name="Error"), work_history=[], education=[], skills=[])
+        return PipelineResult(
+            success=False,
+            dataset=f"resume_{document_id}",
+            document_type="resume",
+            error=str(e),
+            status="failed"
+        )
 
-async def process_legal_document(text: str, document_id: str) -> Any:
+async def process_legal_document(text: str, document_id: str) -> PipelineResult:
     """Direct Legal Processing Pipeline"""
     try:
+        extraction = await extract_legal_entities(text)
         result = await default_ecl.process(
             doc_id=document_id,
             text_content=text,
             metadata={"type": "contract"},
-            extraction_task=extract_legal_entities(text),
+            extraction_task=extraction,
             dataset_name_prefix="contract"
         )
-        return result["data"]
+        return PipelineResult(
+            success=True,
+            dataset=result["dataset"],
+            document_type="contract",
+            data=extraction,
+            status=result["status"]
+        )
     except Exception as e:
         logger.error(f"Legal pipeline failed: {e}")
-        return {"error": str(e)}
+        return PipelineResult(
+            success=False,
+            dataset=f"contract_{document_id}",
+            document_type="contract",
+            error=str(e),
+            status="failed"
+        )
 
-async def process_financial_document(text: str, document_id: str) -> Any:
+async def process_financial_document(text: str, document_id: str) -> PipelineResult:
     """Direct Financial Processing Pipeline"""
     try:
+        extraction = await extract_financial_entities(text)
         result = await default_ecl.process(
             doc_id=document_id,
             text_content=text,
             metadata={"type": "invoice"},
-            extraction_task=extract_financial_entities(text),
+            extraction_task=extraction,
             dataset_name_prefix="invoice"
         )
-        return result["data"]
+        return PipelineResult(
+            success=True,
+            dataset=result["dataset"],
+            document_type="invoice",
+            data=extraction,
+            status=result["status"]
+        )
     except Exception as e:
         logger.error(f"Financial pipeline failed: {e}")
-        return {"error": str(e)}
+        return PipelineResult(
+            success=False,
+            dataset=f"invoice_{document_id}",
+            document_type="invoice",
+            error=str(e),
+            status="failed"
+        )
 
-async def process_education_document(text: str, document_id: str) -> Any:
+async def process_education_document(text: str, document_id: str) -> PipelineResult:
     """Direct Education Processing Pipeline"""
     try:
+        extraction = await extract_education_entities(text)
         result = await default_ecl.process(
             doc_id=document_id,
             text_content=text,
             metadata={"type": "education"},
-            extraction_task=extract_education_entities(text),
+            extraction_task=extraction,
             dataset_name_prefix="course"
         )
-        return result["data"]
+        return PipelineResult(
+            success=True,
+            dataset=result["dataset"],
+            document_type="education",
+            data=extraction,
+            status=result["status"]
+        )
     except Exception as e:
         logger.error(f"Education pipeline failed: {e}")
-        return {"error": str(e)}
+        return PipelineResult(
+            success=False,
+            dataset=f"course_{document_id}",
+            document_type="education",
+            error=str(e),
+            status="failed"
+        )
 
-
-
-async def process_generic_document(text: str, document_id: str, document_type: str = "document") -> Dict[str, Any]:
+async def process_generic_document(text: str, document_id: str, document_type: str = "document") -> PipelineResult:
     """Generic fall-back pipeline"""
     if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
     logger.info(f"📄 Processing GENERIC document {document_id}")
     try:
-        await professional_ingestion_workflow(text, document_id)
-        return {"success": True, "dataset": f"doc_{document_id}", "type": "generic"}
+        # Use ECL directly without extraction
+        result = await default_ecl.process(
+            doc_id=document_id,
+            text_content=text,
+            metadata={"type": document_type},
+            extraction_task=None,
+            dataset_name_prefix="doc"
+        )
+        
+        return PipelineResult(
+            success=True,
+            dataset=result["dataset"],
+            document_type="generic",
+            status=result["status"]
+        )
     except Exception as e:
         logger.error(f"Generic pipeline failed: {e}")
-        raise
+        return PipelineResult(
+            success=False,
+            dataset=f"doc_{document_id}",
+            document_type="generic",
+            error=str(e),
+            status="failed"
+        )
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -634,7 +726,7 @@ def detect_document_type(text: str) -> str:
         return best_match
     return "document"
 
-async def route_to_pipeline(text: str, document_id: str, document_type: Optional[str] = None) -> Any:
+async def route_to_pipeline(text: str, document_id: str, document_type: Optional[str] = None) -> PipelineResult:
     """Smart routing to appropriate processing pipeline"""
     if not document_type or document_type == "auto_detect":
         document_type = detect_document_type(text)
@@ -649,20 +741,9 @@ async def route_to_pipeline(text: str, document_id: str, document_type: Optional
     elif document_type == "education" or document_type == "academic":
         return await process_education_document(text, document_id)
     else:
-        return await process_generic_document(text, document_id)
+        return await process_generic_document(text, document_id, document_type)
 
 async def professional_ingestion_workflow(text: str, document_id: str):
-    """Standard Cognee Pipeline for generic documents"""
-    try:
-        # Use ECL without structured extraction (Generic)
-        result = await default_ecl.process(
-            doc_id=document_id,
-            text_content=text,
-            metadata={"type": "generic"},
-            extraction_task=None, # No structured extraction for generic docs yet
-            dataset_name_prefix="doc"
-        )
-        return {"status": "completed", "document_id": document_id, "dataset": result["dataset"]}
-    except Exception as e:
-        logger.error(f"Professional ingestion failed: {e}")
-        raise
+    """Deprecated: Use process_generic_document instead"""
+    # Kept for backward compatibility if imported elsewhere
+    return await process_generic_document(text, document_id)

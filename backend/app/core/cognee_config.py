@@ -43,8 +43,6 @@ class CogneeSettings(BaseSettings):
     COGNEE_GRAPH_DB_TYPE: str = "neo4j"
     COGNEE_GRAPH_URL: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")
-    NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "changeme123")
 
     # Default User for Cognee operations
@@ -56,12 +54,11 @@ class CogneeSettings(BaseSettings):
     COGNEE_VECTOR_DB_URL: str = os.getenv("LANCEDB_URI", "/app/cognee_data/lancedb")
     # COGNEE_VECTOR_DB_KEY: Not needed for LanceDB
 
-    # LLM & Embedding (Using Qwen + FastEmbed/SentenceTransformers)
-    # NOTE: Set to 'openai' to use HF Inference API via OpenAI-compatible endpoint.
-    # This bypasses Cognee's strict provider validation while using YOUR HF Token/Model.
-    LLM_PROVIDER: str = os.getenv("COGNEE_LLM_PROVIDER", "openai")
-    LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-    LLM_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
+    # LLM & Embedding (Using Gemini + FastEmbed/SentenceTransformers)
+    # Changed default to "gemini" as per user request and availability of API key
+    LLM_PROVIDER: str = os.getenv("COGNEE_LLM_PROVIDER", "gemini")
+    LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "gemini/gemini-2.0-flash")
+    LLM_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("LLM_API_KEY")
     
     # Standard Embedding Config (Matches Cognee 0.5.x expectations)
     EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "fastembed")
@@ -69,7 +66,7 @@ class CogneeSettings(BaseSettings):
     EMBEDDING_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
 
     # Cognee Processing Options
-    EXTRACTION_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+    EXTRACTION_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "gemini/gemini-2.0-flash")
     GRAPH_DATABASE_URL: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 
     class Config:
@@ -97,6 +94,4 @@ os.environ["COGNEE_EMBEDDING_PROVIDER"] = settings.EMBEDDING_PROVIDER # Alias fo
 if settings.LLM_API_KEY and settings.LLM_API_KEY != "local":
     os.environ["LLM_API_KEY"] = settings.LLM_API_KEY
 
-# Set Cognee root directory for data storage
-COGNEE_ROOT_DIR = os.getenv("COGNEE_ROOT_DIR", "/app/cognee_data")
-os.environ["COGNEE_ROOT_DIR"] = COGNEE_ROOT_DIR
+
