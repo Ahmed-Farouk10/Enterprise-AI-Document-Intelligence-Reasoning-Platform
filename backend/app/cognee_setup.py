@@ -111,19 +111,34 @@ def apply_cognee_monkey_patch():
             # We create a wrapper that swallows extra args to match whatever signature Cognee 0.5.x expects
             # while FORCING our own paths.
             
-            def create_safe_engine(**kwargs):
-                logger.info(f"[PATCH] creating_engine called. Swallowing args: {list(kwargs.keys())}")
-                # We ignore whatever path/provider they passed and force ours
-                # Simplified args for SQLite to avoid 'unexpected keyword argument' errors
-                return create_relational_engine(
-                    db_path=DB_PATH,
-                    db_name="cognee_db",
-                    db_provider="sqlite",
-                    db_host="localhost",
-                    db_port=5432,
-                    db_username="cognee",
-                    db_password="password"
-                )
+                # --- FIX: Permissions Recursively ---
+                try:
+                    import subprocess
+                    subprocess.run(["chmod", "-R", "777", COGNEE_ROOT], check=False)
+                except Exception:
+                    pass
+
+                # --- FIX: Robust Engine Creation with Fallback ---
+                try:
+                    logger.info("[PATCH] Attempting create_relational_engine with fixed args...")
+                    return create_relational_engine(
+                        db_path=DB_PATH,
+                        db_name="cognee_db",
+                        db_provider="sqlite",
+                        db_host="localhost",
+                        db_port=5432,
+                        db_username="cognee",
+                        db_password="password"
+                    )
+                except Exception as factory_error:
+                    logger.error(f"[PATCH] Cognee factory failed: {factory_error}. FALLING BACK TO MANUAL ENGINE.")
+                    
+                    # Manual SQLAlchemy Engine Creation
+                    from sqlalchemy import create_engine
+                    # Ensure 4 slashes for absolute path on *nix
+                    db_url = f"sqlite:///{os.path.join(DB_PATH, 'cognee_db.db')}"
+                    logger.info(f"[PATCH] Manually creating engine at: {db_url}")
+                    return create_engine(db_url)
             
             # Create the singleton instance
             correct_engine = create_safe_engine()
