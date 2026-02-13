@@ -37,6 +37,43 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     const [uploadError, setUploadError] = React.useState<string | null>(null)
     const [chatSessions, setChatSessions] = React.useState<ChatSession[]>([])
     const [sessionsLoading, setSessionsLoading] = React.useState(true)
+    const processedDocIds = React.useRef<Set<string>>(new Set())
+
+    // Initial setup for processed IDs (to avoid re-toasting old completed docs on refresh)
+    React.useEffect(() => {
+        if (documents.length > 0 && processedDocIds.current.size === 0) {
+            documents.forEach(doc => {
+                if (doc.status === 'completed') processedDocIds.current.add(doc.id)
+            })
+        }
+    }, [documents])
+
+    // Handle document completion notifications
+    React.useEffect(() => {
+        documents.forEach(doc => {
+            if (doc.status === 'completed' && !processedDocIds.current.has(doc.id)) {
+                processedDocIds.current.add(doc.id)
+
+                // Extract details from metadata
+                const stats = (doc.metadata as any)?.graph_stats
+
+                // Construct the message the user requested:
+                // ✅ Resume processed: Ahmed Ayman Farouk Shahin, 5 positions, 0 skills
+                const personName = stats?.entities?.Person?.[0]?.name || doc.originalName || 'Document'
+                const positionCount = stats?.graph_stats?.entities?.Position?.length || stats?.entities?.Position?.length || 0
+                const skillCount = stats?.graph_stats?.entities?.Skill?.length || stats?.entities?.Skill?.length || 0
+
+                const detailStr = stats
+                    ? `✅ Resume processed: ${personName}, ${positionCount} positions, ${skillCount} skills`
+                    : `✅ Document processed successfully: ${doc.originalName}`
+
+                toast({
+                    title: "Processing Complete",
+                    description: detailStr,
+                })
+            }
+        })
+    }, [documents, toast])
 
     // Poll for updates (Chat sessions & Documents)
     React.useEffect(() => {
@@ -68,10 +105,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         return () => clearInterval(interval)
     }, [fetchDocuments])
 
-    // Actually, let's just verify what we have.
-    // We have: const { documents, loading, uploadDocument, deleteDocument, uploadProgress, error } = useDocuments()
-    // We miss 'fetchDocuments' in destructuring. Let's add it.
-
     const handleUpload = async (file: File) => {
         setIsUploading(true)
         setUploadError(null)
@@ -84,8 +117,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
         if (result.success) {
             toast({
-                title: "Upload Successful",
-                description: `${file.name} has been uploaded successfully.`,
+                title: "Upload Started",
+                description: `${file.name} is being processed in the background.`,
             })
         } else {
             setUploadError(result.error || 'Upload failed')

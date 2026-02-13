@@ -1,5 +1,6 @@
 import logging
 import json
+import os
 from typing import Type, TypeVar, Any, Dict, List, Optional
 from pydantic import BaseModel
 from app.services.llm_service import llm_service
@@ -18,6 +19,7 @@ class CustomCogneeLLMEngine:
     def __init__(self):
         self.provider = "custom_local"
         self.model = "Qwen/Qwen2.5-7B-Instruct"
+        self.api_key = os.getenv("LLM_API_KEY", "local")
 
     async def acreate_structured_output(
         self, 

@@ -137,6 +137,8 @@ class CogneeEngine:
                 # We set both to be safe
                 cognee.config.llm_engine = local_llm_engine
                 cognee.config.llm_client = local_llm_engine
+                cognee.config.llm_provider = "custom_local"
+                cognee.config.llm_api_key = os.getenv("LLM_API_KEY", "local")
                 
                 logger.info("✅ Forced Custom LLM Engine (Local Qwen for Structured Output)")
             except Exception as e_llm:
