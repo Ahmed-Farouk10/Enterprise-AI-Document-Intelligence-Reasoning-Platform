@@ -145,9 +145,10 @@ class CogneeEngine:
                 logger.error(f"❌ Failed to inject Custom LLM: {e_llm}")
                 # Fallback to config-based, but FORCE proper provider if on HF Spaces
                 if os.getenv("HF_HOME") or os.getenv("HF_TOKEN"):
-                    logger.info("⚠️ Falling back to HuggingFace Provider (HF Spaces detected)")
-                    cognee.config.llm_provider = "huggingface"
-                    cognee.config.llm_model = "huggingface/Qwen/Qwen2.5-7B-Instruct"
+                    logger.info("⚠️ Falling back to OpenAI Provider (HF Proxy) for Spaces")
+                    cognee.config.llm_provider = "openai"
+                    cognee.config.llm_model = "Qwen/Qwen2.5-7B-Instruct"
+                    cognee.config.llm_endpoint = f"https://api-inference.huggingface.co/models/{cognee.config.llm_model}/v1"
                     cognee.config.llm_api_key = os.getenv("HF_TOKEN", "")
             
         except Exception as e:

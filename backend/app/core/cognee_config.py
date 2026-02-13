@@ -56,8 +56,10 @@ class CogneeSettings(BaseSettings):
     # COGNEE_VECTOR_DB_KEY: Not needed for LanceDB
 
     # LLM & Embedding (Using Qwen + FastEmbed/SentenceTransformers)
-    LLM_PROVIDER: str = os.getenv("COGNEE_LLM_PROVIDER", "huggingface")
-    LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "huggingface/Qwen/Qwen2.5-7B-Instruct")
+    # NOTE: Set to 'openai' to use HF Inference API via OpenAI-compatible endpoint.
+    # This bypasses Cognee's strict provider validation while using YOUR HF Token/Model.
+    LLM_PROVIDER: str = os.getenv("COGNEE_LLM_PROVIDER", "openai")
+    LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
     LLM_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
     
     # Standard Embedding Config (Matches Cognee 0.5.x expectations)
