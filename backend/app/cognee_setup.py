@@ -172,27 +172,29 @@ def configure_cognee_paths():
     
     # User requested function structure:
     # def nuclear_wipe(): ...
-    print(f"[INFO] 🧹 Starting Nuclear Wipe of Cognee root: {persistence_root}")
-    if os.path.exists(persistence_root):
+    # User requested function structure:
+    # def nuclear_wipe(): ...
+    print(f"[INFO] 🧹 Starting Nuclear Wipe of Cognee root: {cognee_root}")
+    if os.path.exists(cognee_root):
         try:
             # Wiping the whole root ensures the SQLite registry and 
             # the empty graph files are perfectly in sync (starting at zero)
-            shutil.rmtree(persistence_root)
+            shutil.rmtree(cognee_root)
             print("[NUCLEAR] Cleared all metadata and ghost records.")
         except Exception as e:
              print(f"[WARNING] Manual cleanup failed: {e}")
     
     # Re-create the mandatory folder structure
     try:
-        os.makedirs(persistence_root, mode=0o777, exist_ok=True)
+        os.makedirs(cognee_root, mode=0o777, exist_ok=True)
         os.makedirs(os.environ["COGNEE_STORAGE_PATH"], mode=0o777, exist_ok=True)
         os.makedirs(os.environ["COGNEE_DB_PATH"], mode=0o777, exist_ok=True)
-        print(f"[CONFIG] Initialized Cognee at: {persistence_root}")
+        print(f"[CONFIG] Initialized Cognee at: {cognee_root}")
     except Exception as e:
         print(f"[WARNING] Could not create Cognee directories: {e}")
 
     # 4. Telemetry Fix (Still needed for read-only systems)
-    anon_id_path = os.path.join(persistence_root, ".anon_id")
+    anon_id_path = os.path.join(cognee_root, ".anon_id")
     os.environ["COGNEE_ANONYMOUS_ID_PATH"] = anon_id_path
     try:
         if not os.path.exists(anon_id_path):
@@ -201,7 +203,7 @@ def configure_cognee_paths():
     except Exception as e:
         print(f"[WARNING] Could not create anon_id: {e}")
 
-    return persistence_root
+    return cognee_root
 
 
 # =============================================================================
