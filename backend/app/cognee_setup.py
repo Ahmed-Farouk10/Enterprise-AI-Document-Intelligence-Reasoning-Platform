@@ -175,8 +175,20 @@ def apply_cognee_monkey_patch():
                 db_config.get_database_url = patched_get_database_url
                 print(f"✅ Monkey-patched database URL function")
         except ImportError:
-            pass  # Module doesn't exist, skip
-        
+            pass
+
+        # CRITICAL FIX: Patch get_anonymous_id to prevent write permission errors
+        try:
+            if hasattr(cognee_utils, 'get_anonymous_id'):
+                def patched_get_anonymous_id():
+                    # Return static ID for HF Spaces to avoid file writes
+                    return "hf-spaces-static-anon-id"
+                
+                cognee_utils.get_anonymous_id = patched_get_anonymous_id
+                print(f"✅ Monkey-patched get_anonymous_id to bypass file system")
+        except Exception as e:
+            print(f"⚠️ Failed to patch get_anonymous_id: {e}")
+
     except ImportError as e:
         print(f"⚠️ Could not apply monkey patch (Cognee not yet imported): {e}")
     except Exception as e:

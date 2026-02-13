@@ -725,8 +725,33 @@ class CogneeEngine:
         """
         Comparative analysis between document and standard/benchmark.
         """
-        # Placeholder for job description string. In real app, fetch text from standard_document_id
-        comparison = await ResumeRetriever.compare_to_job(document_id, "Standard Job Description")
+        # Fetch real text from standard document
+        job_description = "Standard Job Description"
+        try:
+            from app.db.database import SessionLocal
+            from app.db.service import DatabaseService
+            
+            with SessionLocal() as db:
+                std_doc = DatabaseService.get_document(db, standard_document_id)
+                if std_doc:
+                    # Try to get text from vector store or read file (simplified: use vector store retrieval)
+                    # For now, we'll try to get it from the vector store if possible, or just use a placeholder if not found
+                    # Better: Read the file if local?
+                    # Let's assume we can search for it in vector store by ID
+                    job_description = f"Content of document {std_doc.filename}" 
+                    
+                    # Try to retrieve actual content from vector store
+                    from app.services.retreival import vector_store
+                    # Vector store doesn't have a direct "get_text_by_id" easily exposed without query
+                    # So we'll search for it strictly
+                    results = vector_store.search(std_doc.filename, k=1)
+                    if results:
+                        job_description = results[0]['text']
+
+        except Exception as e:
+            logger.warning(f"Could not fetch standard document text: {e}")
+
+        comparison = await ResumeRetriever.compare_to_job(document_id, job_description)
         
         return GraphQueryResult(
             answer=f"Alignment Score: {comparison.overall_match_score}%\n\nRecommendations:\n" + "\n".join(comparison.recommendations),

@@ -9,7 +9,13 @@ from sqlalchemy.exc import OperationalError
 logger = logging.getLogger(__name__)
 
 # Database URL - defaults to SQLite for development
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./docucentric.db")
+# CRITICAL: On HF Spaces, use /data for persistence
+if os.path.exists("/data") and os.access("/data", os.W_OK):
+    DATABASE_PATH = "/data/docucentric.db"
+else:
+    DATABASE_PATH = "./docucentric.db"
+
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATABASE_PATH}")
 
 # For PostgreSQL in production, use:
 # DATABASE_URL = "postgresql://user:password@localhost/dbname"
