@@ -173,14 +173,17 @@ def configure_cognee_paths():
     
     print(f"[INFO] 🧹 Starting Nuclear Cleanup of Cognee artifacts...")
     
-    # 1. Metadata Database (The Source of Integrity Deadlocks)
-    cognee_db_path = os.path.join(cognee_root, "databases", "cognee_db.db")
-    if os.path.exists(cognee_db_path):
+    # 1. Cognee Databases (The Source of Integrity Deadlocks/Ghost Records)
+    # The error 'UNIQUE constraint failed' means metadata is out of sync.
+    # Wiping this folder forces Cognee to re-register EVERYTHING cleanly.
+    cognee_db_dir = os.path.join(cognee_root, "databases")
+    if os.path.exists(cognee_db_dir):
         try:
-            os.remove(cognee_db_path)
-            print(f"[CLEANUP] Deleted metadata DB: {cognee_db_path}")
+            shutil.rmtree(cognee_db_dir)
+            os.makedirs(cognee_db_dir, mode=0o777, exist_ok=True)
+            print(f"[CLEANUP] Wiped Cognee databases folder: {cognee_db_dir}")
         except Exception as e:
-            print(f"[WARNING] Could not delete metadata DB: {e}")
+            print(f"[WARNING] Could not wipe databases folder: {e}")
 
     # 2. Data Storage (Ingested blobs, Vector DB files, Graph DB files)
     storage_dir = os.path.join(cognee_root, "data_storage")
