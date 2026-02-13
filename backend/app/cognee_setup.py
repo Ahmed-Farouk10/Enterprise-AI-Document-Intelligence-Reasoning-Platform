@@ -32,18 +32,27 @@ if llm_key.startswith("hf_") or os.getenv("HF_TOKEN"):
     os.environ["LLM_PROVIDER"] = "openai" 
     os.environ["COGNEE_LLM_PROVIDER"] = "openai"
     
-    # FIX: LiteLLM requires 'huggingface/' prefix and NEW ROUTER for models used via HF Inference API
-    # Without this prefix, the graph extraction fails silently!
-    model_id = "Qwen/Qwen2.5-7B-Instruct"
-    # UPDATED: Use the new Hugging Face Router endpoint (Old api-inference.huggingface.co is deprecated/410)
-    hf_endpoint = "https://router.huggingface.co/hf-inference/v1"
+    # FIX: Bypass LiteLLM's broken HF integration (410 Gone) by forcing OpenAI protocol
+    # We point the OpenAI client to the new HF Router endpoint
+    hf_router = "https://router.huggingface.co/hf-inference/v1"
     
-    os.environ["LLM_ENDPOINT"] = hf_endpoint
-    os.environ["COGNEE_LLM_ENDPOINT"] = hf_endpoint
-    os.environ["LLM_MODEL"] = f"huggingface/{model_id}"
-    os.environ["COGNEE_LLM_MODEL"] = f"huggingface/{model_id}"
+    # 1. Force Provider to 'openai'
+    os.environ["LLM_PROVIDER"] = "openai" 
+    os.environ["COGNEE_LLM_PROVIDER"] = "openai"
     
-    print(f"[INFO] LLM Configured: Provider=openai (HF Router), Model={model_id}")
+    # 2. Override Endpoint to HF Router
+    os.environ["LLM_ENDPOINT"] = hf_router
+    os.environ["COGNEE_LLM_ENDPOINT"] = hf_router
+    os.environ["LLM_API_BASE"] = hf_router # LiteLLM specific override
+    
+    # 3. Use 'openai/' prefix to force OpenAI protocol in LiteLLM
+    # This prevents it from autoswitching back to the broken 'huggingface' logic
+    model_id = "openai/Qwen/Qwen2.5-7B-Instruct" 
+    
+    os.environ["LLM_MODEL"] = model_id
+    os.environ["COGNEE_LLM_MODEL"] = model_id
+    
+    print(f"[INFO] LLM Configured: Provider=openai (HF Router via OpenAI protocol), Model={model_id}")
 
 # =============================================================================
 # COGNEE PATH CONFIGURATION (AGGRESSIVE)
