@@ -132,7 +132,60 @@ def configure_cognee_paths():
 
 
 # =============================================================================
-# FORCE PATH CONFIGURATION & PATCHING ON IMPORT
+# MONKEY PATCH: Override Cognee's internal path resolution
+# =============================================================================
+def apply_cognee_monkey_patch():
+    """
+    Aggressively patch Cognee's path resolution at import time.
+    This runs AFTER environment variables are set but BEFORE Cognee initializes.
+    """
+    try:
+        # Import Cognee's path utilities
+        import cognee
+        from cognee.shared import utils as cognee_utils
+        
+        # Override the get_system_root_directory function if it exists
+        if hasattr(cognee_utils, 'get_system_root_directory'):
+            def patched_get_system_root_directory(*args, **kwargs):
+                """Force return our configured path"""
+                return COGNEE_ROOT
+            
+            cognee_utils.get_system_root_directory = patched_get_system_root_directory
+            print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_system_root_directory")
+        
+        # CRITICAL FIX: Patch get_anonymous_id to prevent write permission errors
+        # We patch BOTH the utils module and the logging_utils module if accessible
+        static_anon_id = "hf-spaces-static-anon-id"
+        
+        def patched_get_anonymous_id():
+            return static_anon_id
+            
+        if hasattr(cognee_utils, 'get_anonymous_id'):
+            cognee_utils.get_anonymous_id = patched_get_anonymous_id
+            print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_anonymous_id")
+
+        # Try to patch logging_utils directly as that's where the error comes from
+        try:
+            from cognee.shared import logging_utils
+            if hasattr(logging_utils, 'get_anonymous_id'):
+                logging_utils.get_anonymous_id = patched_get_anonymous_id
+                print(f"[SUCCESS] Monkey-patched cognee.shared.logging_utils.get_anonymous_id")
+                
+            # Also patch the file path variable if it exists
+            if hasattr(logging_utils, 'ANONYMOUS_ID_PATH'):
+                logging_utils.ANONYMOUS_ID_PATH = os.path.join(COGNEE_ROOT, ".anon_id")
+                
+        except ImportError:
+            pass
+
+    except ImportError as e:
+        print(f"[WARNING] Could not apply monkey patch (Cognee not yet imported): {e}")
+    except Exception as e:
+        print(f"[WARNING] Monkey patch failed: {e}")
+
+
+# =============================================================================
+# FORCE PATH CONFIGURATION ON IMPORT
 # =============================================================================
 # 1. Configure paths (Environment Variables)
 COGNEE_ROOT = configure_cognee_paths()
