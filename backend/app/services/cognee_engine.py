@@ -237,9 +237,9 @@ class CogneeEngine:
                         id=target_user_id,
                         email="default@example.com"
                     )
-                    # Fix: create_user likely expects the user object as a positional argument
-                    # or the signature is create_user(user: User)
-                    await create_user(new_user)
+                    # FIX: create_user requires a password argument in Cognee 0.5.2+
+                    # Signature appears to be: create_user(user: User, password: str)
+                    await create_user(new_user, "DefaultPassword123!")
                     
                     logger.info(f"✅ Created user {target_user_id}")
                     
