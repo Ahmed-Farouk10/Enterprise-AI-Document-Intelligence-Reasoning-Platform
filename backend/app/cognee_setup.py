@@ -166,14 +166,44 @@ def configure_cognee_paths():
     print(f"Writable: {os.access(cognee_root, os.W_OK)}")
     print(f"=" * 80)
     
-    # CRITICAL: Fix for IntegrityError (Stuck metadata)
-    # If the database exists but is corrupted/half-written from a failed run,
-    # we might need to reset it. For now, we print a warning.
+    # CRITICAL: Fix for IntegrityError & Corrupted Files (Ghost Records)
+    # The error 'UNIQUE constraint failed' or empty graphs often mean metadata is out of sync.
+    # We perform a NUCLEAR CLEANUP once during startup to ensure a clean slate.
+    import shutil
+    
+    print(f"[INFO] 🧹 Starting Nuclear Cleanup of Cognee artifacts...")
+    
+    # 1. Metadata Database (The Source of Integrity Deadlocks)
     cognee_db_path = os.path.join(cognee_root, "databases", "cognee_db.db")
-    if os.path.exists(cognee_db_path) and os.path.getsize(cognee_db_path) < 1024:
-        print(f"[WARNING] Cognee DB seems too small ({os.path.getsize(cognee_db_path)} bytes), potential corruption.")
-        # We don't delete it automatically unless absolutely sure, 
-        # but the user can use this info to prune.
+    if os.path.exists(cognee_db_path):
+        try:
+            os.remove(cognee_db_path)
+            print(f"[CLEANUP] Deleted metadata DB: {cognee_db_path}")
+        except Exception as e:
+            print(f"[WARNING] Could not delete metadata DB: {e}")
+
+    # 2. Data Storage (Ingested blobs, Vector DB files, Graph DB files)
+    storage_dir = os.path.join(cognee_root, "data_storage")
+    if os.path.exists(storage_dir):
+        try:
+            # We clear the contents so Cognee can re-initialize the folder structure
+            for item in os.listdir(storage_dir):
+                item_path = os.path.join(storage_dir, item)
+                if os.path.isfile(item_path):
+                    os.remove(item_path)
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+            print(f"[CLEANUP] Purged data_storage contents at: {storage_dir}")
+        except Exception as e:
+            print(f"[WARNING] Could not clear storage_dir: {e}")
+
+    # 3. Anonymous ID (Often causes permission issues if left behind)
+    if os.path.exists(anon_id_path):
+        try:
+            os.remove(anon_id_path)
+            print(f"[CLEANUP] Deleted anonymous ID: {anon_id_path}")
+        except Exception as e:
+            print(f"[WARNING] Could not delete anon_id: {e}")
 
     return cognee_root
 

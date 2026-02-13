@@ -25,7 +25,7 @@ RUN useradd -m -u 1000 appuser && \
 ENV HF_HOME=/app/.cache
 ENV TRANSFORMERS_CACHE=/app/.cache
 ENV PYTHONUNBUFFERED=1
-ENV FORCE_REBUILD_DEPS=2026-02-13_TIME_1730
+ENV FORCE_REBUILD_DEPS=2026-02-13_TIME_1826
 
 # Copy requirements
 COPY requirements.txt .
