@@ -209,13 +209,31 @@ class CogneeEngine:
             await create_db_and_tables()
             logger.info("✅ Cognee database tables created/verified")
             
-            # Verify default user exists
+            # INFO: Cognee 0.5.x might create a random default user if none exists.
+            # We must force usage of our configured DEFAULT_USER_ID to ensure persistence.
             try:
-                from cognee.modules.users.methods import get_default_user
-                default_user = await get_default_user()
-                logger.info(f"✅ Default user verified: {default_user.id if default_user else 'None'}")
+                from cognee.modules.users.methods import get_user, create_user
+                from cognee.modules.users.models import User
+                
+                target_user_id = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
+                existing_user = await get_user(target_user_id)
+                
+                if not existing_user:
+                    logger.info(f"👤 Creating configured default user: {target_user_id}")
+                    # Create the user explicitly
+                    await create_user(
+                        user=User(
+                            id=target_user_id,
+                            email="default@example.com",
+                            name="Default User"
+                        )
+                    )
+                    logger.info(f"✅ Created user {target_user_id}")
+                else:
+                    logger.info(f"✅ Verified available user: {target_user_id}")
+                    
             except Exception as user_error:
-                logger.warning(f"⚠️ Could not verify default user: {user_error}")
+                logger.warning(f"⚠️ User registration issue (non-fatal): {user_error}")
             
             logger.info("✅ Cognee engine initialized successfully")
             

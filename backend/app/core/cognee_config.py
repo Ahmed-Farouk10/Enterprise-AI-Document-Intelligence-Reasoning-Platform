@@ -10,8 +10,12 @@ if not os.getenv("LLM_API_KEY"):
     print(f"🔑 LLM_API_KEY set to: {os.environ['LLM_API_KEY'][:10]}..." if len(os.environ['LLM_API_KEY']) > 10 else "local")
 
 # --- COGNEE PATH CONFIGURATION (MUST BE BEFORE IMPORT) ---
-# Detect writable directory for HuggingFace Spaces / Docker
-if os.getenv("HF_HOME"):
+# Detect persistent directory for HuggingFace Spaces
+if os.path.exists("/data") and os.access("/data", os.W_OK):
+    # CRITICAL: Use /data for persistence
+    _cognee_root = os.path.join("/data", "cognee_data")
+    print(f"📦 Cognee persisting to: {_cognee_root}")
+elif os.getenv("HF_HOME"):
     _cognee_root = os.path.join(os.getenv("HF_HOME"), "cognee_data")
 else:
     _cognee_root = os.path.join(os.getcwd(), ".cognee_system")
@@ -21,6 +25,8 @@ os.makedirs(_cognee_root, exist_ok=True)
 
 # Set env vars for Cognee to pick up
 os.environ["COGNEE_ROOT_DIR"] = _cognee_root
+# Force SQLite db path inside persistence
+os.environ["COGNEE_DATABASE_URL"] = f"sqlite:///{_cognee_root}/cognee.db"
 
 # CRITICAL FIX: Skip LLM connection test on HF Spaces
 # Cognee's setup_and_check_environment() calls test_llm_connection() which hangs for 30+ seconds
