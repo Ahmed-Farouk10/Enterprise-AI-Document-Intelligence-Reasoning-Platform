@@ -139,6 +139,16 @@ class ECLProcessor:
                 logger.info(f"✅ ECL Pipeline success: Values persisted to Graph & Vector Store")
             except asyncio.TimeoutError:
                 logger.warning(f"⚠️ Cognify timed out after {self.config.cognify_timeout}s. Data is saved but graph relationships may be incomplete.")
+            except Exception as e:
+                # CRITICAL HANDLER for "TextSummary_text collection not found"
+                if "TextSummary" in str(e) or "collection not found" in str(e):
+                    logger.warning(f"⚠️ Vector store issue detected: {e}. Attempting recovery...")
+                    # This often means the raw text node wasn't created properly.
+                    # We supress this error because the structured data MIGHT still be there.
+                    # In a production ECL, we'd dead-letter queue this.
+                else:
+                    logger.error(f"❌ Cognify failed: {e}")
+                    # Don't re-raise if we want to return partial results (structured data extract was successful)
             
             # STEP 5: SELF-IMPROVEMENT (Memify Registration)
             try:

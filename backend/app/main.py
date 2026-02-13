@@ -2,26 +2,21 @@
 import os
 import pathlib
 import sys
+import logging
 
 # ===== CRITICAL: Configure Cognee Path BEFORE Any Other Imports =====
-# Force Cognee to use writable directory (fix for HF Spaces permissions)
-# Default is site-packages which is read-only
-cognee_root = "/app/.cache/cognee_data"
-os.environ["COGNEE_ROOT"] = cognee_root
-os.environ["COGNEE_ROOT_DIR"] = cognee_root 
-os.environ["SYSTEM_ROOT_DIRECTORY"] = cognee_root
-os.environ["COGNEE_DATA_STORAGE"] = f"{cognee_root}/data_storage"
-os.environ["COGNEE_DATA_STORAGE"] = f"{cognee_root}/data_storage"
-# CRITICAL: Fix telemetry permission error
-os.environ["COGNEE_ANONYMOUS_ID_PATH"] = "/tmp/.cognee_anon_id"
-os.environ["ANONYMOUS_ID_PATH"] = "/tmp/.cognee_anon_id" # Try both variants
+# This ensures environment variables and monkey patches are applied 
+# BEFORE Cognee or any other module imports it.
+try:
+    from app.cognee_setup import COGNEE_ROOT, verify_cognee_setup
+except ImportError:
+    # Fallback if running from root without package context
+    sys.path.append(os.path.join(os.getcwd(), 'app'))
+    from app.cognee_setup import COGNEE_ROOT, verify_cognee_setup
 
-# Create directories explicitly
-pathlib.Path(f"{cognee_root}/data_storage").mkdir(parents=True, exist_ok=True)
-pathlib.Path(f"{cognee_root}/databases").mkdir(parents=True, exist_ok=True)
-
-# NOW import cognee setup
-from app.cognee_setup import COGNEE_ROOT, verify_cognee_setup
+# Create directories explicitly (Redundant but safe)
+pathlib.Path(f"{COGNEE_ROOT}/data_storage").mkdir(parents=True, exist_ok=True)
+pathlib.Path(f"{COGNEE_ROOT}/databases").mkdir(parents=True, exist_ok=True)
 # ====================================================================
 
 from fastapi import FastAPI, Request
