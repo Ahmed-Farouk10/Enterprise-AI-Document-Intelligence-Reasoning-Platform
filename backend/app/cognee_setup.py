@@ -243,6 +243,57 @@ def apply_cognee_monkey_patch():
             except ImportError:
                 print("[WARNING] Could not patch test_llm_connection (ImportError)")
 
+        # CRITICAL FIX: Patch save_data_to_file's internal data directory
+        try:
+            from cognee.modules.ingestion import save_data_to_file as save_data_module
+            # Check if processing has data_root_directory
+            if hasattr(save_data_module, 'data_root_directory'):
+                 save_data_module.data_root_directory = os.path.join(COGNEE_ROOT, "data")
+                 print(f"[SUCCESS] Monkey-patched cognee.modules.ingestion.save_data_to_file.data_root_directory")
+            
+            # Also check get_data_root_directory in utils
+            if hasattr(cognee_utils, 'get_data_root_directory'):
+                 def patched_get_data_root_directory(*args, **kwargs):
+                     return os.path.join(COGNEE_ROOT, "data")
+                 cognee_utils.get_data_root_directory = patched_get_data_root_directory
+                 print(f"[SUCCESS] Monkey-patched cognee.shared.utils.get_data_root_directory")
+
+        except ImportError:
+            print("[WARNING] Could not patch save_data_to_file (ImportError)")
+        except Exception as e:
+            print(f"[WARNING] Failed to patch save_data_to_file: {e}")
+
+        # CRITICAL FIX: Patch get_file_storage to force writable directory
+        try:
+            from cognee.infrastructure.files.storage import LocalFileStorage
+            storage_module = __import__('cognee.infrastructure.files.storage', fromlist=['get_file_storage'])
+            
+            if hasattr(storage_module, 'get_file_storage'):
+                original_get_file_storage = storage_module.get_file_storage
+                
+                def patched_get_file_storage(storage_path=None):
+                    # Force storage path to be inside our writable COGNEE_ROOT/data
+                    # We ignore the passed storage_path if it looks like a system path
+                    target_path = os.path.join(COGNEE_ROOT, "data")
+                    if storage_path and "site-packages" in str(storage_path):
+                         print(f"[PATCH] Redirecting storage from {storage_path} to {target_path}")
+                         return LocalFileStorage(target_path)
+                    
+                    # Also redirect if None or empty
+                    if not storage_path:
+                        print(f"[PATCH] Redirecting empty storage path to {target_path}")
+                        return LocalFileStorage(target_path)
+                        
+                    return original_get_file_storage(storage_path)
+                
+                storage_module.get_file_storage = patched_get_file_storage
+                print(f"[SUCCESS] Monkey-patched cognee.infrastructure.files.storage.get_file_storage")
+                
+        except ImportError:
+            print("[WARNING] Could not patch get_file_storage (ImportError)")
+        except Exception as e:
+            print(f"[WARNING] Failed to patch get_file_storage: {e}")
+
     except ImportError as e:
         print(f"[WARNING] Could not apply monkey patch (Cognee not yet imported): {e}")
     except Exception as e:
