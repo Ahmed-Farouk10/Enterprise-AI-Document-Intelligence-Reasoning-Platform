@@ -13,29 +13,38 @@ import sys
 # CRITICAL: SET LLM_API_KEY AND PROVIDER BEFORE ANYTHING ELSE
 # =============================================================================
 # Cognee checks for LLM_API_KEY during import and will fail if not set.
-# We also must ensure it knows we are using HuggingFace if on Spaces.
+# We FORCE OpenAI provider configuration to bypass Cognee's internal validation,
+# but we route it to Hugging Face Inference API. This is a crucial workaround.
+
+# 1. Ensure API Key is set
 if not os.getenv("LLM_API_KEY"):
-    # Use HF_TOKEN if available, otherwise use 'local' placeholder
     llm_key = os.getenv("HF_TOKEN", "local")
     os.environ["LLM_API_KEY"] = llm_key
+else:
+    llm_key = os.environ["LLM_API_KEY"]
+    print(f"[INFO] LLM_API_KEY already set: {llm_key[:10]}...")
+
+# 2. FORCE OpenAI Provider + HF Endpoint (Unless explicitly overridden to something else valid)
+# We only do this if we are using the HF Token (which usually starts with hf_)
+if llm_key.startswith("hf_") or os.getenv("HF_TOKEN"):
+    print("[INFO] Configuring OpenAI Proxy for Hugging Face Inference API...")
     
-    # FORCE OpenAI provider (to pass Cognee Enum validation) but use HF Endpoint
-    os.environ["LLM_PROVIDER"] = "openai"
+    # Provider must be 'openai' to pass validation
+    os.environ["LLM_PROVIDER"] = "openai" 
     os.environ["COGNEE_LLM_PROVIDER"] = "openai"
     
-    # Configure HF OpenAI-Compatible Endpoint
-    # Format: https://api-inference.huggingface.co/models/<MODEL_ID>/v1
+    # Endpoint must point to HF
     model_id = "Qwen/Qwen2.5-7B-Instruct"
-    os.environ["LLM_ENDPOINT"] = f"https://api-inference.huggingface.co/models/{model_id}/v1"
-    os.environ["COGNEE_LLM_ENDPOINT"] = f"https://api-inference.huggingface.co/models/{model_id}/v1"
+    hf_endpoint = f"https://api-inference.huggingface.co/models/{model_id}/v1"
     
-    # Set Model ID (Clean, without prefix if using openai provider with custom endpoint)
+    os.environ["LLM_ENDPOINT"] = hf_endpoint
+    os.environ["COGNEE_LLM_ENDPOINT"] = hf_endpoint
+    
+    # Model name must be clean (no prefix) for OpenAI provider
     os.environ["LLM_MODEL"] = model_id
     os.environ["COGNEE_LLM_MODEL"] = model_id
     
     print(f"[INFO] LLM Configured: Provider=openai (HF Proxy), Model={model_id}")
-else:
-    print(f"[INFO] LLM_API_KEY already set: {os.environ['LLM_API_KEY'][:10]}...")
 
 # =============================================================================
 # COGNEE PATH CONFIGURATION (AGGRESSIVE)
