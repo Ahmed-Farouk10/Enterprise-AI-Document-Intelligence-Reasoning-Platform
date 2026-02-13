@@ -173,48 +173,69 @@ def configure_cognee_paths():
 # =============================================================================
 def apply_cognee_monkey_patch():
     """
-                # Force storage path to be inside our writable COGNEE_ROOT/data
-                target_path = os.path.join(COGNEE_ROOT, "data")
-                
-                # If path is None or looks like a system path, override it
-                if not path or "site-packages" in str(path):
-                    print(f"[PATCH] LocalFileStorage.__init__: Redirecting {path} to {target_path}")
-                    path = target_path
-                
-                # Call original init with correct path
-                LocalFileStorage._original_init(self, path)
-            
-            LocalFileStorage.__init__ = patched_init
-            print(f"[SUCCESS] Monkey-patched LocalFileStorage.__init__")
-            
-        except ImportError:
-            print("[WARNING] Could not patch LocalFileStorage.__init__ (ImportError)")
-        except Exception as e:
-            print(f"[WARNING] Failed to patch LocalFileStorage.__init__: {e}")
-
-        # Enable DEBUG logging for Cognee internals if on Spaces or requested
-        if os.getenv("HF_HOME") or os.getenv("COGNEE_DEBUG") == "true":
-            try:
-                import logging
-                logging.getLogger("cognee").setLevel(logging.DEBUG)
-                print("[INFO] 🛠️ Cognee DEBUG logging enabled for deep diagnostics")
-            except Exception:
-                pass
-
-        # USER SUGGESTED FIX: Programmatically force data root if utility exists
-        try:
-            from cognee.shared.utils import set_data_root
-            set_data_root(os.path.join(COGNEE_ROOT, "data"))
-            print(f"[SUCCESS] Forced data root via cognee.shared.utils.set_data_root")
-        except ImportError:
-            print("[INFO] cognee.shared.utils.set_data_root not found")
-        except Exception as e:
-            print(f"[WARNING] Failed to call set_data_root: {e}")
-
-    except ImportError as e:
-        print(f"[WARNING] Could not apply monkey patch (Cognee not yet imported): {e}")
+    NUCLEAR PATCH: Hijack Cognee's internal path resolution to prevent PermissionErrors.
+    This intercepts os.makedirs and overrides LocalFileStorage properties.
+    """
+    import os
+    import cognee
+    from cognee.infrastructure.files.storage import LocalFileStorage
+    
+    print("[INFO] 🔨 Applying Nuclear Patch for PermissionError...")
+    
+    # 1. THE NUCLEAR OPTION: Hijack the internal path resolution
+    # Cognee 0.5.2 uses an internal storage_path property. We will force it.
+    target_root = os.environ.get("COGNEE_DATA_ROOT", "/app/.cache/cognee_data")
+    WRITABLE_DIR = os.path.join(target_root, "data_storage")
+    
+    try:
+        os.makedirs(WRITABLE_DIR, exist_ok=True)
     except Exception as e:
-        print(f"[WARNING] Monkey patch failed: {e}") 
+        print(f"[WARNING] Could not create WRITABLE_DIR {WRITABLE_DIR}: {e}")
+
+    # We override the property entirely so it CANNOT point to site-packages
+    def forced_storage_path(self):
+        return WRITABLE_DIR
+
+    # Attach the fix to the class itself
+    LocalFileStorage.storage_path = property(forced_storage_path)
+    print(f"[SUCCESS] Hijacked LocalFileStorage.storage_path -> {WRITABLE_DIR}")
+    
+    # 2. Patch the Ingestion Module's static variable
+    try:
+        from cognee.modules.ingestion import save_data_to_file
+        save_data_to_file.data_root_directory = target_root
+        print(f"[SUCCESS] Forced save_data_to_file.data_root_directory to {target_root}")
+    except Exception as e:
+        print(f"[DEBUG] save_data_to_file patch skipped: {e}")
+
+    # 3. Patch the 'makedirs' call inside LocalFileStorage to prevent permission errors
+    original_makedirs = os.makedirs
+    def patched_makedirs(name, mode=0o777, exist_ok=False):
+        if "site-packages/cognee" in str(name):
+            try:
+                if hasattr(cognee, '__file__'):
+                    pkg_path = os.path.dirname(cognee.__file__)
+                    if pkg_path in str(name):
+                        new_path = str(name).replace(pkg_path, target_root)
+                        print(f"[PATCH] os.makedirs: Redirecting {name} -> {new_path}")
+                        return original_makedirs(new_path, mode, exist_ok)
+            except Exception as inner:
+                print(f"[WARNING] Redirect logic failed: {inner}")
+                
+        return original_makedirs(name, mode, exist_ok)
+    
+    os.makedirs = patched_makedirs
+    print("[SUCCESS] Global os.makedirs patched to redirect site-packages calls")
+    
+    # 4. Extra: Set data root if utility exists (Redundant but safe)
+    try:
+        from cognee.shared.utils import set_data_root
+        set_data_root(target_root)
+        print(f"[SUCCESS] Called cognee.shared.utils.set_data_root({target_root})")
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[WARNING] set_data_root failed: {e}")
 
 # =============================================================================
 # FORCE PATH CONFIGURATION ON IMPORT
