@@ -53,20 +53,28 @@ class CustomCogneeLLMEngine:
                     mode=instructor.Mode.GEMINI_JSON
                 )
                 
-                # Call Gemini
-                # Note: instructor.from_gemini returns a client that mimics OpenAI's interface but for Gemini
-                # Wait, instructor's Gemini support is slightly different.
-                # Valid implementation for instructor < 1.0 was different.
-                # For basic compatibility, we accept that we might need to adjust.
-                # Let's use the standard `messages` approach.
+                # Custom Retry Logic for Quota Issues
+                from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+                from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
                 
-                resp = await client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": text_input}
-                    ],
-                    response_model=response_model,
+                @retry(
+                    stop=stop_after_attempt(10),
+                    wait=wait_exponential(multiplier=2, min=10, max=120),
+                    retry=retry_if_exception_type((ResourceExhausted, ServiceUnavailable)),
+                    reraise=True
                 )
+                async def _call_gemini_with_retry():
+                    logger.info("Attempting Gemini generation (with backoff)...")
+                    return await client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": text_input}
+                        ],
+                        response_model=response_model,
+                        max_retries=3 # Inner retries for other errors
+                    )
+
+                resp = await _call_gemini_with_retry()
                 return resp
 
             # --- LOCAL QWEN SUPPORT (Original Logic) ---

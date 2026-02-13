@@ -86,16 +86,54 @@ def apply_cognee_monkey_patch():
             # log(f"[PATCH] create_safe_engine intercepted call. Args: {kwargs.keys()}")
             
             # DIRECT HACK: Always return a fresh valid engine to the specific path
-            db_url = f"sqlite:///{os.path.join(DB_PATH, 'cognee_db.db')}"
-            try:
-                # Ensure directory exists just in case
-                os.makedirs(DB_PATH, mode=0o777, exist_ok=True)
+            # Manual SQLAlchemy Engine Creation
+            
+            # --- FIX: Engine Adapter ---
+            # Cognee expects the engine object to have a 'create_database' method.
+            # Raw SQLAlchemy engines don't have this, so we wrap it.
+            class RobustEngineAdapter:
+                def __init__(self, real_engine):
+                    self._real_engine = real_engine
                 
-                # log(f"[PATCH] Creating manual engine: {db_url}")
-                return create_engine(db_url)
-            except Exception as e:
-                log(f"[FATAL] Failed to create manual engine: {e}", "error")
-                raise
+                def create_database(self):
+                    logger.info("[PATCH] adapters.create_database called - ensuring directory exists.")
+                    if self._real_engine.url.drivername.startswith("sqlite"):
+                        # Ensure directory exists
+                        db_path = self._real_engine.url.database
+                        if db_path:
+                            os.makedirs(os.path.dirname(db_path), mode=0o777, exist_ok=True)
+                
+                def __getattr__(self, name):
+                    return getattr(self._real_engine, name)
+                    
+                # Proxy magic methods required by SQLAlchemy
+                def connect(self, *args, **kwargs):
+                    return self._real_engine.connect(*args, **kwargs)
+                    
+                def begin(self, *args, **kwargs):
+                    return self._real_engine.begin(*args, **kwargs)
+                    
+                @property
+                def url(self):
+                    return self._real_engine.url
+                    
+                @property
+                def driver(self):
+                    return self._real_engine.driver
+                    
+                @property
+                def dialect(self):
+                    return self._real_engine.dialect
+
+            # Ensure 4 slashes for absolute path on *nix
+            db_url = f"sqlite:///{os.path.join(DB_PATH, 'cognee_db.db')}"
+            logger.info(f"[PATCH] Manually creating engine at: {db_url}")
+            raw_engine = create_engine(db_url)
+            return RobustEngineAdapter(raw_engine)
+
+        except Exception as e:
+            log(f"[FATAL] Failed to create manual engine: {e}", "error")
+            raise
 
         # --- FIX 3: Hunt and Destroy ---
         # We replace the function in every loaded module that might have it
