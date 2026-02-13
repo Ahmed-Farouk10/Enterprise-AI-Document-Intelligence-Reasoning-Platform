@@ -107,26 +107,35 @@ def apply_cognee_monkey_patch():
             from cognee.infrastructure.databases.relational import get_relational_engine
             from cognee.infrastructure.databases.relational.create_relational_engine import create_relational_engine
             
-            # Create a correct engine
-            # FIX: create_relational_engine requires all args even for SQLite
-            correct_engine = create_relational_engine(
-                db_path=DB_PATH,
-                db_name="cognee_db",
-                db_provider="sqlite",
-                db_host="localhost",   # Dummy val
-                db_port=5432,          # Dummy val
-                db_username="cognee",  # Dummy val
-                db_password="cognee"   # Dummy val
-            )
+            # --- FIX: Robust Engine Creation ---
+            # We create a wrapper that swallows extra args to match whatever signature Cognee 0.5.x expects
+            # while FORCING our own paths.
             
-            # Monkeypatch the getter to valid engine
-            # We assign it to the module's global variable if it caches it
+            def create_safe_engine(**kwargs):
+                logger.info(f"[PATCH] creating_engine called with: {kwargs.keys()}")
+                # We ignore whatever path/provider they passed and force ours
+                return create_relational_engine(
+                    db_path=DB_PATH,
+                    db_name="cognee_db",
+                    db_provider="sqlite",
+                    db_host="localhost",   # Helper args to satisfy signature
+                    db_port=5432,
+                    db_username="cognee",
+                    db_password="cognee",
+                    db_ssl_mode="disable"  # Add SSL mode just in case
+                )
+            
+            # Create the singleton instance
+            correct_engine = create_safe_engine()
+            
+            # Monkeypatch the getter to return our correct engine
             import cognee.infrastructure.databases.relational as rel_module
+            
             if hasattr(rel_module, "relational_engine"):
                 rel_module.relational_engine = correct_engine
                 logger.info("[PATCH] Replaced cached relational_engine singleton.")
                 
-            # Also patch the function itself to return our engine
+            # Also patch the function itself
             def patched_get_engine():
                 return correct_engine
                 
