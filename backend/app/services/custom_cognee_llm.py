@@ -180,16 +180,6 @@ class CustomCogneeLLMEngine:
         schema = response_model.model_json_schema()
         schema_str = json.dumps(schema, indent=2)
         
-        prompt = f"""
-{text_input}
-
-INSTRUCTION:
-Extract the information into a valid JSON object matching this schema:
-{schema_str}
-
-OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
-"""
-        
         # 2. Detailed system prompt
         full_system_prompt = f"""{system_prompt}
 You are a precise data extraction engine. Output valid JSON only.
@@ -199,18 +189,30 @@ IMPORTANT:
 - DO NOT populate internal fields like 'id', 'created_at', 'updated_at', 'ontology_valid', 'version', 'topological_rank', 'metadata', or 'type' UNLESS they have specific values in the source text.
 - Omit these internal fields entirely to save space and prevent truncation.
 - Ensure the JSON is complete and valid.
+INSTRUCTION:
+Extract the information into a valid JSON object matching this schema:
+{schema_str}
+
+OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
 """
+        user_prompt = text_input
+
+        # 3. Call local LLM service - DIRECT GENERATION
+        # We bypass llm_service.generate() because it respects LLM_MODEL env var (which is 'gemini')
+        # We want to force usage of the local model
         
-        # 3. Call local LLM service
-        llm_service._ensure_loaded()
+        logger.info("🛡️ Invoking Local Transformer Model (Qwen/Phi3) directly...")
         
-        response_text = await self._generate_async(full_system_prompt, prompt)
+        response_text = await self._generate_local_direct(full_system_prompt, user_prompt)
         
         # 4. Parse and Validate
         cleaned_json = self._clean_json(response_text)
         
         if not cleaned_json.strip().startswith(('{', '[')):
             logger.error(f"❌ LLM returned non-JSON response: {cleaned_json[:200]}...")
+            # Detect if we got an error message instead of JSON
+            if "Error" in cleaned_json or "429" in cleaned_json:
+                 raise ValueError(f"CRITICAL: Local Fallback failed to run model. returned error: {cleaned_json}")
             raise ValueError(f"LLM API error (Non-JSON response): {cleaned_json[:100]}")
             
         logger.debug(f"🔍 Extracted JSON: {cleaned_json[:200]}...")
@@ -218,21 +220,63 @@ IMPORTANT:
         result = response_model.model_validate_json(cleaned_json)
         return result
 
-    async def _generate_async(self, system: str, user: str) -> str:
-        """Helper to bridge sync LLMService to async Cognee"""
+    async def _generate_local_direct(self, system: str, user: str) -> str:
+        """
+        Directly invoke the transformers model from llm_service, ignoring config.
+        """
         import asyncio
         
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user}
-        ]
-        
-        return await asyncio.to_thread(
-            llm_service.generate, 
-            prompt=messages, 
-            max_tokens=4096, 
-            temperature=0.1
-        )
+        def _sync_generate():
+            # Check if model is loaded on the service
+            if llm_service.model is None:
+                # Force load the local model if it's missing (even if configured for Gemini)
+                logger.info("⚠️ Local model not loaded. forcing load of Qwen/Phi3...")
+                # Temporarily override model name to ensure we load a local model, not Gemini
+                original_name = llm_service.model_name
+                if "gemini" in original_name.lower():
+                     llm_service.model_name = "Qwen/Qwen2.5-7B-Instruct" 
+                
+                llm_service.load_model()
+                # Restore name? No, keep it loaded as Qwen for this session fallback context
+            
+            # Now generate using the loaded model
+            # We copy logic from llm_service.generate but bypassing the "if gemini" check
+            
+            prompt = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ]
+            
+            text = llm_service.tokenizer.apply_chat_template(
+                prompt,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+
+            inputs = llm_service.tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=8192
+            ).to(llm_service.model.device)
+            
+            outputs = llm_service.model.generate(
+                **inputs,
+                max_new_tokens=4096,
+                do_sample=True,
+                temperature=0.1,
+                top_p=0.9,
+                repetition_penalty=1.15,
+                pad_token_id=llm_service.tokenizer.eos_token_id
+            )
+            
+            response = llm_service.tokenizer.decode(
+                outputs[0][len(inputs.input_ids[0]):],
+                skip_special_tokens=True
+            )
+            return response.strip()
+
+        return await asyncio.to_thread(_sync_generate)
 
     def _clean_json(self, text: str) -> str:
         """Sanitize LLM output to extract JSON"""
