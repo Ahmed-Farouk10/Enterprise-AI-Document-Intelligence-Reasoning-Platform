@@ -336,4 +336,14 @@ class RedisCacheAdapter:
             return {'status': 'unhealthy', 'error': str(e)}
 
 # Global instance
-redis_adapter = RedisCacheAdapter()
+# Initialize with settings from config
+from app.config import settings
+
+redis_adapter = RedisCacheAdapter(
+    host=settings.REDIS_HOST,
+    port=settings.REDIS_PORT,
+    db=settings.REDIS_DB,
+    password=settings.REDIS_PASSWORD,
+    ssl=settings.REDIS_SSL,
+    max_connections=settings.REDIS_MAX_CONNECTIONS
+)

@@ -92,6 +92,8 @@ services:
       
       # Redis
       REDIS_URL: redis://:{REDIS_PASSWORD:-changeme123}@redis:6379/0
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme123}
       
       # Qdrant
       QDRANT_HOST: qdrant
@@ -152,6 +154,8 @@ services:
       
       # Redis
       REDIS_URL: redis://:{REDIS_PASSWORD:-changeme123}@redis:6379/0
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme123}
       
       # Qdrant
       QDRANT_HOST: qdrant
