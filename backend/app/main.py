@@ -57,6 +57,17 @@ async def lifespan(app: FastAPI):
     
     logger.info("application_startup", status="creating_database_tables")
     Base.metadata.create_all(bind=engine)
+    
+    # [ADDED] Force Cognee Table Creation (Synchronous Wrapper)
+    # This is critical for HF Spaces where async init might be flaky
+    try:
+        from cognee.infrastructure.databases.relational import create_db_and_tables
+        logger.info("⚙️ STARTUP: Forcing Cognee table verification...")
+        await create_db_and_tables()
+        logger.info("✅ STARTUP: Cognee tables initialized.")
+    except Exception as e:
+        logger.error(f"⚠️ STARTUP WARNING: Cognee init failed: {e}")
+
     logger.info("application_startup", status="database_initialized")
 
     # Warmup LLM Service

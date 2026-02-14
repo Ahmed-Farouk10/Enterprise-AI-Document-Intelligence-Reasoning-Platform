@@ -171,10 +171,8 @@ services:
       
       # Cognee
       COGNEE_LLM_PROVIDER: huggingface
-      COGNEE_LLM_MODEL: ${COGNEE_LLM_MODEL:-Qwen/Qwen2.5-32B-Instruct}
+      COGNEE_LLM_MODEL: ${COGNEE_LLM_MODEL:-Qwen/Qwen2.5-72B-Instruct}
       COGNEE_API_KEY: ${COGNEE_API_KEY:-}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_API_KEY_FALLBACK: ${LLM_API_KEY_FALLBACK:-}
       
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
