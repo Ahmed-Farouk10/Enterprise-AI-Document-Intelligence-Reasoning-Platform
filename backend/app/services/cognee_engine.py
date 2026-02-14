@@ -196,7 +196,8 @@ class CogneeEngine:
             from cognee.infrastructure.databases.relational import create_db_and_tables
             
             # Create database tables if they don't exist
-            await create_db_and_tables()
+            # Cognee 0.5.x patch: create_db_and_tables is synchronous
+            create_db_and_tables()
             logger.info("✅ Cognee database tables created/verified")
             
             # INFO: Cognee 0.5.x might create a random default user if none exists.
@@ -209,7 +210,8 @@ class CogneeEngine:
                 
                 try:
                     # get_user raises EntityNotFoundError if not found (it doesn't return None)
-                    existing_user = await get_user(target_user_id)
+                    # Cognee 0.5.x patch: get_user is synchronous
+                    existing_user = get_user(target_user_id)
                     logger.info(f"✅ Verified available user: {target_user_id}")
                 except Exception:
                     # User with ID 5e5ab... not found. 
@@ -225,7 +227,8 @@ class CogneeEngine:
                         logger.info("  - Creating user 'default@example.com'...")
                         
                         # FIX: create_user(email: str, password: str) - NO ID argument
-                        created_user = await create_user(
+                        # Cognee 0.5.x patch: create_user is synchronous
+                        created_user = create_user(
                             email="default@example.com",
                             password="DefaultPassword123!"
                         )
