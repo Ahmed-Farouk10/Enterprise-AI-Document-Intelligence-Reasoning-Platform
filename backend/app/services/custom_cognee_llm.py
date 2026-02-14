@@ -94,7 +94,7 @@ class CustomCogneeLLMEngine:
                             {"role": "user", "content": text_input}
                         ],
                         response_model=response_model,
-                        max_retries=2
+                        max_retries=0 # Disable inner retries to trigger rotation immediately
                     )
 
                 resp = await _call_gemini_with_rotation()
