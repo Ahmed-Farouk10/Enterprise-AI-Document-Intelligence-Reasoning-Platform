@@ -213,12 +213,8 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
 
     def _ensure_loaded(self) -> None:
         """Lazy loading wrapper"""
-        if self.model is None and "gemini" not in self.model_name.lower():
+        if self.model is None:
             self.load_model()
-        elif "gemini" in self.model_name.lower():
-            # Gemini doesn't need "loading" but we can check the key
-            if not os.getenv("GOOGLE_API_KEY") and not os.getenv("LLM_API_KEY"):
-                 logger.warning("⚠️ Gemini selected but NO API KEY found (GOOGLE_API_KEY or LLM_API_KEY)")
 
     def warmup(self) -> None:
         """Eager loading for production deployment"""
@@ -666,15 +662,8 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         messages = self._prepare_messages(system_prompt, document_context, question)
 
         # Fallback to Inference API if model not loaded
+        # Fallback to Inference API if model not loaded
         if self.model is None:
-            if "gemini" in self.model_name.lower():
-                # Simple fallback to non-streaming for Gemini for now (or implement streaming later)
-                yield "[STREAM_START]\n"
-                full_text = self._generate_via_gemini(messages, max_new_tokens, temperature)
-                yield full_text
-                yield "\n[STREAM_END]"
-                return
-
             logger.info("Using HuggingFace Inference API for streaming")
             yield from self._generate_via_inference_api_stream(
                 prompt=messages,

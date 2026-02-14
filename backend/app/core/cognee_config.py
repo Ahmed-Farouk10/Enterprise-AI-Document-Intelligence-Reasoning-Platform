@@ -5,9 +5,12 @@ import os
 # --- CRITICAL: SET LLM_API_KEY BEFORE COGNEE IMPORTS ---
 # Cognee checks for this during module import, so it MUST be set first
 if not os.getenv("LLM_API_KEY"):
-    # Use HF_TOKEN if available, otherwise use 'local' placeholder
-    os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN", "local")
-    print(f"🔑 LLM_API_KEY set to: {os.environ['LLM_API_KEY'][:10]}..." if len(os.environ['LLM_API_KEY']) > 10 else "local")
+    # Use HF_TOKEN if available.
+    if os.getenv("HF_TOKEN"):
+        os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN")
+        print(f"🔑 LLM_API_KEY set to: {os.environ['LLM_API_KEY'][:10]}...")
+    else:
+        print("⚠️ No LLM_API_KEY or HF_TOKEN found. Cognee may fail LLM connection tests.")
 
 # --- CRITICAL: INHERIT FROM CENTRAL SETUP ---
 # We reuse the logic from app/cognee_setup.py to ensure consistency
@@ -32,7 +35,20 @@ os.environ["COGNEE_DATABASE_URL"] = f"sqlite:///{_cognee_root}/databases/cognee_
 # CRITICAL FIX: Skip LLM connection test on HF Spaces
 # Cognee's setup_and_check_environment() calls test_llm_connection() which hangs for 30+ seconds
 # when LLM_API_KEY is invalid. This causes pipeline timeout.
-if os.getenv("HF_HOME") or not os.getenv("HF_TOKEN"):
+if os.getenv("HF_TOKEN"):
+    # Force HuggingFace Provider for Cognee
+    os.environ["COGNEE_LLM_PROVIDER"] = "huggingface"
+    os.environ["COGNEE_LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct" 
+    
+    # AGGRESSIVELY REMOVE GOOGLE KEYS to prevent LiteLLM auto-discovery
+    if "GOOGLE_API_KEY" in os.environ:
+        print("⚠️ Unsetting GOOGLE_API_KEY to prevent conflict")
+        del os.environ["GOOGLE_API_KEY"]
+    if "GEMINI_API_KEY" in os.environ:
+         print("⚠️ Unsetting GEMINI_API_KEY to prevent conflict")
+         del os.environ["GEMINI_API_KEY"]
+
+    # Skip LLM connection test on HF Spaces
     os.environ["COGNEE_SKIP_LLM_TEST"] = "true"
     logger_msg = "⚙️ Cognee: Skipping LLM connection test (HF Spaces / no valid token)"
     print(logger_msg)
