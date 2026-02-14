@@ -197,9 +197,25 @@ class CogneeEngine:
             
             # Create database tables if they don't exist
             # Cognee 0.5.x patch: create_db_and_tables is synchronous -- Correction: It IS async in this env
-            await create_db_and_tables()
-            logger.info("✅ Cognee database tables created/verified")
-            
+            try:
+                await create_db_and_tables()
+                logger.info("✅ Cognee database tables created/verified via standard method.")
+            except Exception as e:
+                logger.error(f"⚠️ Standard create_db_and_tables failed: {e}. Attempting manual table creation.")
+                
+                # --- MANUAL FALLBACK FOR TABLE CREATION ---
+                try:
+                    from cognee.infrastructure.databases.relational import get_relational_engine, Base
+                    engine = get_relational_engine()
+                    # Ensure we are using async methods on AsyncEngine
+                    async with engine.begin() as conn:
+                        logger.info("🔧 Running manual DDL for Cognee tables...")
+                        await conn.run_sync(Base.metadata.create_all)
+                    logger.info("✅ Cognee database tables manually created.")
+                except Exception as manual_error:
+                    logger.critical(f"❌ Failed to manually create tables: {manual_error}")
+                    raise manual_error
+
             # INFO: Cognee 0.5.x might create a random default user if none exists.
             # We must force usage of our configured DEFAULT_USER_ID to ensure persistence.
             try:
