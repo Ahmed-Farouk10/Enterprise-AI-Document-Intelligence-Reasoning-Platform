@@ -6,7 +6,7 @@ try:
     with open("backend/app/services/cognee_engine.py", "r", encoding="utf-8") as f:
         content = f.read()
     compile(content, "backend/app/services/cognee_engine.py", "exec")
-    print("✅ Syntax OK")
+    print(" Syntax OK")
 except Exception as e:
-    print(f"❌ Syntax Error: {e}")
+    print(f" Syntax Errorr: {e}")
     sys.exit(1)
