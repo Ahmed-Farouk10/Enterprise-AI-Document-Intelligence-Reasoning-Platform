@@ -95,7 +95,7 @@ def apply_cognee_monkey_patch():
                 def __init__(self, real_engine):
                     self._real_engine = real_engine
                 
-                def create_database(self):
+                async def create_database(self):
                     logger.info("[PATCH] adapters.create_database called - ensuring directory exists.")
                     if self._real_engine.url.drivername.startswith("sqlite"):
                         # Ensure directory exists
