@@ -108,14 +108,22 @@ OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
         
         # 3. Parse JSON
         cleaned_json = self._clean_json(response_text)
+        
+        # Check for error strings - Fail Gracefully
+        if "error" in cleaned_json.lower() or "429" in cleaned_json:
+             logger.error(f"❌ HF API returned error message: {cleaned_json}")
+             raise ValueError(f"HF API Error: {cleaned_json[:200]}")
+
         if not cleaned_json.strip().startswith(('{', '[')):
-             # Check for error strings
-             if "Error" in cleaned_json or "429" in cleaned_json:
-                 raise ValueError(f"HF API returned error: {cleaned_json}")
+             logger.error(f"❌ HF API returned non-JSON: {cleaned_json[:200]}")
              raise ValueError(f"HF API non-JSON response: {cleaned_json[:100]}")
 
-        result = response_model.model_validate_json(cleaned_json)
-        return result
+        try:
+            result = response_model.model_validate_json(cleaned_json)
+            return result
+        except Exception as validation_error:
+            logger.error(f"❌ JSON Validation Failed: {validation_error} | Content: {cleaned_json[:200]}")
+            raise validation_error
 
     async def _generate_with_ollama(self, text_input, system_prompt, response_model, host, model):
         """
