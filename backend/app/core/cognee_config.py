@@ -12,6 +12,18 @@ if not os.getenv("LLM_API_KEY"):
     else:
         print("⚠️ No LLM_API_KEY or HF_TOKEN found. Cognee may fail LLM connection tests.")
 
+# --- FAILSAFE: Force Clean Env Vars ---
+if "gemini" in os.getenv("LLM_PROVIDER", "").lower():
+    os.environ["LLM_PROVIDER"] = "huggingface"
+if "gemini" in os.getenv("COGNEE_LLM_PROVIDER", "").lower():
+    os.environ["COGNEE_LLM_PROVIDER"] = "huggingface"
+    
+if "gemini" in os.getenv("LLM_MODEL", "").lower():
+    os.environ["LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct"
+if "gemini" in os.getenv("COGNEE_LLM_MODEL", "").lower():
+    os.environ["COGNEE_LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct" 
+# --------------------------------------
+
 # --- CRITICAL: INHERIT FROM CENTRAL SETUP ---
 # We reuse the logic from app/cognee_setup.py to ensure consistency
 try:
@@ -70,19 +82,18 @@ class CogneeSettings(BaseSettings):
     COGNEE_VECTOR_DB_URL: str = os.getenv("LANCEDB_URI", "/app/cognee_data/lancedb")
     # COGNEE_VECTOR_DB_KEY: Not needed for LanceDB
 
-    # LLM & Embedding (Using Gemini + FastEmbed/SentenceTransformers)
-    # Changed default to "gemini" as per user request and availability of API key
-    LLM_PROVIDER: str = os.getenv("COGNEE_LLM_PROVIDER", "gemini")
-    LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "gemini/gemini-2.0-flash")
-    LLM_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("LLM_API_KEY")
+    # LLM & Embedding (Defaulting to Hugging Face for Spaces Compatibility)
+    LLM_PROVIDER: str = os.getenv("COGNEE_LLM_PROVIDER", "huggingface")
+    LLM_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+    LLM_API_KEY: Optional[str] = os.getenv("LLM_API_KEY") or os.getenv("HF_TOKEN")
     
-    # Standard Embedding Config (Matches Cognee 0.5.x expectations)
+    # Standard Embedding Config
     EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "fastembed")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
     EMBEDDING_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
 
     # Cognee Processing Options
-    EXTRACTION_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "gemini/gemini-2.0-flash")
+    EXTRACTION_MODEL: str = os.getenv("COGNEE_LLM_MODEL", "Qwen/Qwen2.5-72B-Instruct")
     GRAPH_DATABASE_URL: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 
     class Config:

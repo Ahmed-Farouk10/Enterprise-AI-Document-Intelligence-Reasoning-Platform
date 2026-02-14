@@ -51,13 +51,30 @@ def verify_cognee_setup():
     os.environ["COGNEE_FILES_PATH"] = DATA_PATH  # Newer cognee variable
     
     # 4. Configure Gemini (LLM)
-    os.environ["LLM_PROVIDER"] = "gemini"
-    os.environ["COGNEE_LLM_PROVIDER"] = "gemini"
-    os.environ["LLM_MODEL"] = "gemini/gemini-2.0-flash"
+    # 4. Configure LLM Defaults (Aggressive Sanitization)
+    # If the user has old Gemini config in their HF Space secrets or .env, we MUST override it.
     
-    # Ensure Key is present
-    if not os.getenv("LLM_API_KEY"):
-        os.environ["LLM_API_KEY"] = "AIzaSyChLF3hBJXMP2S5WGgYumMrNfZK-cURvZg"
+    current_provider = os.getenv("LLM_PROVIDER", "").lower()
+    if not current_provider or "gemini" in current_provider:
+        print(f"⚠️ Detected invalid/legacy provider '{current_provider}'. Forcing 'huggingface'.")
+        os.environ["LLM_PROVIDER"] = "huggingface"
+    
+    current_cognee_provider = os.getenv("COGNEE_LLM_PROVIDER", "").lower()
+    if not current_cognee_provider or "gemini" in current_cognee_provider:
+        os.environ["COGNEE_LLM_PROVIDER"] = "huggingface"
+        
+    if not os.getenv("LLM_MODEL") or "gemini" in os.getenv("LLM_MODEL", "").lower():
+        os.environ["LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct"
+        
+    if not os.getenv("COGNEE_LLM_MODEL") or "gemini" in os.getenv("COGNEE_LLM_MODEL", "").lower():
+        os.environ["COGNEE_LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct"
+
+    # Ensure Key is present (HF_TOKEN preferred)
+    if not os.getenv("LLM_API_KEY") or os.getenv("LLM_API_KEY").startswith("AIza"):
+        if os.getenv("HF_TOKEN"):
+             os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN")
+        else:
+             os.environ["LLM_API_KEY"] = "local" # Fallback prevents crash
 
     os.environ["EMBEDDING_PROVIDER"] = "fastembed"
     
