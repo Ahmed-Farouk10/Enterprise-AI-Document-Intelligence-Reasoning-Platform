@@ -38,43 +38,66 @@ class CustomCogneeLLMEngine:
             if os.environ.get("LLM_PROVIDER") == "gemini":
                 import instructor
                 import google.generativeai as genai
-                
-                api_key = os.environ.get("LLM_API_KEY")
-                if not api_key:
-                    raise ValueError("LLM_API_KEY required for Gemini")
-                
-                genai.configure(api_key=api_key)
-                
-                # Create client with instructor
-                client = instructor.from_gemini(
-                    client=genai.GenerativeModel(
-                        model_name=os.environ.get("LLM_MODEL", "gemini-2.0-flash").replace("gemini/", "") # Strip prefix if present
-                    ),
-                    mode=instructor.Mode.GEMINI_JSON
-                )
-                
-                # Custom Retry Logic for Quota Issues
-                from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
                 from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
+                from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+
+                # 1. Load Keys (Primary + Fallback)
+                keys = []
+                primary = os.environ.get("LLM_API_KEY")
+                if primary: keys.append(primary)
                 
+                # Check for explicit fallback env var or the one user just gave us
+                fallback = os.environ.get("LLM_API_KEY_FALLBACK", "AIzaSyArJJPEvW_WhNak1NQFAfCZMY2dIrYOUWg")
+                if fallback and fallback != primary: 
+                    keys.append(fallback)
+                
+                if not keys:
+                    raise ValueError("LLM_API_KEY required for Gemini")
+
+                # State for rotation (simple index)
+                # We use a mutable container to persist state across retry attempts
+                key_state = {"index": 0, "keys": keys}
+
+                def get_current_client():
+                    current_key = key_state["keys"][key_state["index"] % len(key_state["keys"])]
+                    genai.configure(api_key=current_key)
+                    return instructor.from_gemini(
+                        client=genai.GenerativeModel(
+                            model_name=os.environ.get("LLM_MODEL", "gemini-2.0-flash").replace("gemini/", "")
+                        ),
+                        mode=instructor.Mode.GEMINI_JSON
+                    )
+
+                def rotate_key(retry_state):
+                    # Callback before sleep: Rotate key if 429
+                    ex = retry_state.outcome.exception()
+                    if isinstance(ex, ResourceExhausted):
+                        key_state["index"] += 1
+                        new_key_idx = key_state["index"] % len(key_state["keys"])
+                        logger.warning(f"⚠️ Quota Exceeded. Rotating to API Key #{new_key_idx + 1}")
+
                 @retry(
-                    stop=stop_after_attempt(10),
-                    wait=wait_exponential(multiplier=2, min=10, max=120),
+                    stop=stop_after_attempt(15), # Increased attempts for rotation
+                    wait=wait_exponential(multiplier=2, min=5, max=60),
                     retry=retry_if_exception_type((ResourceExhausted, ServiceUnavailable)),
+                    before_sleep=rotate_key,
                     reraise=True
                 )
-                async def _call_gemini_with_retry():
-                    logger.info("Attempting Gemini generation (with backoff)...")
+                async def _call_gemini_with_rotation():
+                    # Always get fresh client in case key changed
+                    client = get_current_client()
+                    
+                    logger.info(f"Attempting Gemini generation (Key #{key_state['index'] % len(keys) + 1})...")
                     return await client.chat.completions.create(
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": text_input}
                         ],
                         response_model=response_model,
-                        max_retries=3 # Inner retries for other errors
+                        max_retries=2
                     )
 
-                resp = await _call_gemini_with_retry()
+                resp = await _call_gemini_with_rotation()
                 return resp
 
             # --- LOCAL QWEN SUPPORT (Original Logic) ---

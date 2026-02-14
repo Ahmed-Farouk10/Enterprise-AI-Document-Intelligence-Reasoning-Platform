@@ -109,6 +109,7 @@ services:
       LLM_PROVIDER: huggingface
       LLM_MODEL: ${LLM_MODEL:-Qwen/Qwen2.5-32B-Instruct}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_API_KEY_FALLBACK: ${LLM_API_KEY_FALLBACK:-}
       
       # Cognee
       COGNEE_LLM_PROVIDER: huggingface
@@ -172,6 +173,8 @@ services:
       COGNEE_LLM_PROVIDER: huggingface
       COGNEE_LLM_MODEL: ${COGNEE_LLM_MODEL:-Qwen/Qwen2.5-32B-Instruct}
       COGNEE_API_KEY: ${COGNEE_API_KEY:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_API_KEY_FALLBACK: ${LLM_API_KEY_FALLBACK:-}
       
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
