@@ -201,7 +201,39 @@ def apply_cognee_monkey_patch():
         for mod_name, mod in list(sys.modules.items()):
             if mod_name.startswith("cognee") and hasattr(mod, target_name):
                 setattr(mod, target_name, create_safe_engine)
-                # log(f"[PATCH] Patched {mod_name}")
+        
+        # --- FIX 3.5: Patch LocalFileStorage to prevent PermissionError ---
+        # The os.makedirs patch is not enough because open() still uses the old path.
+        # We must change the path at the source (Storage initialization).
+        try:
+            from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+            
+            original_init = LocalFileStorage.__init__
+            
+            def patched_init(self, storage_path: str = None):
+                # Check and redirect path if needed
+                if storage_path:
+                    path_str = str(storage_path)
+                    if "site-packages" in path_str and "cognee" in path_str:
+                        # Redirect!
+                        relative_name = os.path.basename(path_str) # e.g. .data_storage
+                        if relative_name.startswith("."):
+                            # Handle .data_storage, .cognee_system
+                            new_path = os.path.join(COGNEE_ROOT, relative_name.lstrip(os.sep))
+                        else:
+                            # Fallback
+                            new_path = os.path.join(COGNEE_ROOT, "data_storage")
+                            
+                        # log(f"⚡ [PATCH] Redirecting Storage Init: {path_str} -> {new_path}")
+                        storage_path = new_path
+                
+                original_init(self, storage_path)
+            
+            LocalFileStorage.__init__ = patched_init
+            log("[PATCH] LocalFileStorage.__init__ patched for redirection")
+
+        except ImportError:
+            pass
 
         log(f"[PATCH] Titanium Patch Complete. Patched primary modules and singletons.")
 
@@ -210,12 +242,18 @@ def apply_cognee_monkey_patch():
         def patched_makedirs(name, mode=0o777, exist_ok=False):
             name_str = str(name)
             if "site-packages" in name_str and "cognee" in name_str:
-                # Redirect to COGNEE_ROOT
-                if ".cognee_system" in name_str:
-                     parts = name_str.split(".cognee_system")
-                     if len(parts) > 1:
-                        new_path = os.path.join(COGNEE_ROOT, parts[1].lstrip(os.sep))
-                        return original_makedirs(new_path, mode, exist_ok)
+                # Redirect various Cognee internal directories to COGNEE_ROOT
+                redirect_targets = [".cognee_system", ".data_storage", "databases", "downloads"]
+                
+                for target in redirect_targets:
+                    if target in name_str:
+                         parts = name_str.split(target)
+                         if len(parts) > 1:
+                            # Construct new path: COGNEE_ROOT + /target + rest of path
+                            relative_part = parts[1].lstrip(os.sep)
+                            new_path = os.path.join(COGNEE_ROOT, target.strip("."), relative_part)
+                            log(f"⚡ [PATCH] Redirecting mkdir '{name}' -> '{new_path}'")
+                            return original_makedirs(new_path, mode, exist_ok)
                 
                 return original_makedirs(name, mode, exist_ok)
             return original_makedirs(name, mode, exist_ok)
