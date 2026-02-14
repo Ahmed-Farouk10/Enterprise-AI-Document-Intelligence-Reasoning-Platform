@@ -81,6 +81,8 @@ def apply_cognee_monkey_patch():
 
         # --- FIX 2: Define The Safe Engine Creator ---
         from sqlalchemy import create_engine
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
         
         def create_safe_engine(**kwargs):
             # log(f"[PATCH] create_safe_engine intercepted call. Args: {kwargs.keys()}")
@@ -89,11 +91,15 @@ def apply_cognee_monkey_patch():
             # Manual SQLAlchemy Engine Creation
             
             # --- FIX: Engine Adapter ---
-            # Cognee expects the engine object to have a 'create_database' method.
-            # Raw SQLAlchemy engines don't have this, so we wrap it.
+            # Cognee expects the engine object to have a 'create_database' method AND 'get_async_session'.
+            # Raw SQLAlchemy engines don't have these, so we wrap it.
             class RobustEngineAdapter:
                 def __init__(self, real_engine):
                     self._real_engine = real_engine
+                    # Create a sessionmaker for async sessions
+                    self.async_session_maker = sessionmaker(
+                        self._real_engine, class_=AsyncSession, expire_on_commit=False
+                    )
                 
                 async def create_database(self):
                     logger.info("[PATCH] adapters.create_database called - ensuring directory exists.")
@@ -103,6 +109,10 @@ def apply_cognee_monkey_patch():
                         if db_path:
                             os.makedirs(os.path.dirname(db_path), mode=0o777, exist_ok=True)
                 
+                def get_async_session(self):
+                    # Returns a new async session instance (which is an async context manager)
+                    return self.async_session_maker()
+
                 def __getattr__(self, name):
                     return getattr(self._real_engine, name)
                     
@@ -127,9 +137,11 @@ def apply_cognee_monkey_patch():
 
             try:
                 # Ensure 4 slashes for absolute path on *nix
-                db_url = f"sqlite:///{os.path.join(DB_PATH, 'cognee_db.db')}"
-                logger.info(f"[PATCH] Manually creating engine at: {db_url}")
-                raw_engine = create_engine(db_url)
+                # USE ASYNC DRIVER: sqlite+aiosqlite
+                db_url = f"sqlite+aiosqlite:///{os.path.join(DB_PATH, 'cognee_db.db')}"
+                logger.info(f"[PATCH] Manually creating ASYNC engine at: {db_url}")
+                # pool_pre_ping=True helps with recovery
+                raw_engine = create_async_engine(db_url, pool_pre_ping=True)
                 return RobustEngineAdapter(raw_engine)
 
             except Exception as e:
