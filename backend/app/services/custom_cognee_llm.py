@@ -38,8 +38,8 @@ class CustomCogneeLLMEngine:
             if os.environ.get("LLM_PROVIDER") == "gemini":
                 import instructor
                 import google.generativeai as genai
-                from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
-                from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+                from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable, GoogleAPIError
+                from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log, RetryError
 
                 # 1. Load Keys (Primary + Fallback)
                 keys = []
@@ -60,6 +60,9 @@ class CustomCogneeLLMEngine:
 
                 def get_current_client():
                     current_key = key_state["keys"][key_state["index"] % len(key_state["keys"])]
+                    # Mask key for logging
+                    masked_key = current_key[:5] + "..." + current_key[-3:]
+                    # logger.info(f"🔑 Using Gemini API Key #{key_state['index'] % len(key_state['keys']) + 1}: {masked_key}")
                     genai.configure(api_key=current_key)
                     return instructor.from_gemini(
                         client=genai.GenerativeModel(
@@ -71,15 +74,30 @@ class CustomCogneeLLMEngine:
                 def rotate_key(retry_state):
                     # Callback before sleep: Rotate key if 429
                     ex = retry_state.outcome.exception()
+                    # Check for ResourceExhausted directly or wrapped
+                    is_quota = False
                     if isinstance(ex, ResourceExhausted):
+                        is_quota = True
+                    elif hasattr(ex, "__cause__") and isinstance(ex.__cause__, ResourceExhausted):
+                        is_quota = True
+                    elif "429" in str(ex) or "Quota" in str(ex):
+                        is_quota = True
+                        
+                    if is_quota:
                         key_state["index"] += 1
                         new_key_idx = key_state["index"] % len(key_state["keys"])
-                        logger.warning(f"⚠️ Quota Exceeded. Rotating to API Key #{new_key_idx + 1}")
+                        logger.warning(f"⚠️ Quota Exceeded (429). Rotating to API Key #{new_key_idx + 1}")
+                    else:
+                        logger.warning(f"⚠️ Retrying due to non-quota error: {ex}")
 
+                # Define exceptions to retry on
+                # We need to be broad because instructor might wrap exceptions
+                
                 @retry(
-                    stop=stop_after_attempt(15), # Increased attempts for rotation
-                    wait=wait_exponential(multiplier=2, min=5, max=60),
-                    retry=retry_if_exception_type((ResourceExhausted, ServiceUnavailable)),
+                    stop=stop_after_attempt(15), 
+                    wait=wait_exponential(multiplier=1, min=2, max=60),
+                    # Retry on ResourceExhausted, ServiceUnavailable, or generic Exception if it looks like a quota/network issue
+                    retry=retry_if_exception_type((ResourceExhausted, ServiceUnavailable, GoogleAPIError, Exception)),
                     before_sleep=rotate_key,
                     reraise=True
                 )
@@ -87,15 +105,22 @@ class CustomCogneeLLMEngine:
                     # Always get fresh client in case key changed
                     client = get_current_client()
                     
-                    logger.info(f"Attempting Gemini generation (Key #{key_state['index'] % len(keys) + 1})...")
-                    return await client.chat.completions.create(
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": text_input}
-                        ],
-                        response_model=response_model,
-                        max_retries=0 # Disable inner retries to trigger rotation immediately
-                    )
+                    try:
+                        logger.info(f"Attempting Gemini generation (Key #{key_state['index'] % len(keys) + 1})...")
+                        return await client.chat.completions.create(
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": text_input}
+                            ],
+                            response_model=response_model,
+                            max_retries=0 # Disable inner retries to trigger our outer loop immediately
+                        )
+                    except Exception as e:
+                        # Log the exact error to help debugging
+                        logger.error(f"❌ Gemini call failed. Type: {type(e).__name__}, Msg: {str(e)}")
+                        # If it is a 429, we want to re-raise it so tenacity catches it.
+                        # If instructor wrapped it, we'll re-raise the wrapper.
+                        raise e
 
                 resp = await _call_gemini_with_rotation()
                 return resp
