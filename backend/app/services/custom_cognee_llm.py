@@ -222,59 +222,83 @@ OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
 
     async def _generate_local_direct(self, system: str, user: str) -> str:
         """
-        Directly invoke the transformers model from llm_service, ignoring config.
+        Directly invoke the transformers model or HF Inference API from llm_service, ignoring config.
         """
         import asyncio
         
         def _sync_generate():
-            # Check if model is loaded on the service
-            if llm_service.model is None:
-                # Force load the local model if it's missing (even if configured for Gemini)
-                logger.info("⚠️ Local model not loaded. forcing load of Qwen/Phi3...")
-                # Temporarily override model name to ensure we load a local model, not Gemini
-                original_name = llm_service.model_name
-                if "gemini" in original_name.lower():
-                     llm_service.model_name = "Qwen/Qwen2.5-7B-Instruct" 
-                
-                llm_service.load_model()
-                # Restore name? No, keep it loaded as Qwen for this session fallback context
+            # 1. Ensure we are targeting the Local Model (Qwen), not Gemini
+            # We temporarily swap the model name so that if we use Inference API, it uses Qwen.
+            original_name = llm_service.model_name
+            target_local_model = "Qwen/Qwen2.5-7B-Instruct"
             
-            # Now generate using the loaded model
-            # We copy logic from llm_service.generate but bypassing the "if gemini" check
-            
-            prompt = [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user}
-            ]
-            
-            text = llm_service.tokenizer.apply_chat_template(
-                prompt,
-                tokenize=False,
-                add_generation_prompt=True
-            )
+            # If currently configured for Gemini, switch to Qwen for this call
+            if "gemini" in original_name.lower():
+                 llm_service.model_name = target_local_model
 
-            inputs = llm_service.tokenizer(
-                text,
-                return_tensors="pt",
-                truncation=True,
-                max_length=8192
-            ).to(llm_service.model.device)
-            
-            outputs = llm_service.model.generate(
-                **inputs,
-                max_new_tokens=4096,
-                do_sample=True,
-                temperature=0.1,
-                top_p=0.9,
-                repetition_penalty=1.15,
-                pad_token_id=llm_service.tokenizer.eos_token_id
-            )
-            
-            response = llm_service.tokenizer.decode(
-                outputs[0][len(inputs.input_ids[0]):],
-                skip_special_tokens=True
-            )
-            return response.strip()
+            try:
+                # 2. Check if model is loaded (or can be loaded)
+                if llm_service.model is None:
+                    # Attempt load (might be skipped if on HF Spaces)
+                    llm_service.load_model()
+                
+                # 3. Branch: Local In-Memory vs. Inference API
+                if llm_service.model is None:
+                    # HF Spaces Mode: Model didn't load. Use Inference API.
+                    logger.info(f"🌐 HF Spaces detected. Using Inference API for {llm_service.model_name}...")
+                    
+                    # Prepare messages for the API
+                    messages = [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user}
+                    ]
+                    # Reuse the service's API method
+                    return llm_service._generate_via_inference_api(
+                        prompt=messages,
+                        max_tokens=4096,
+                        temperature=0.1
+                    )
+                else:
+                    # Local In-Memory Mode
+                    logger.info("🛡️ Using In-Memory Local Model...")
+                    
+                    prompt = [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user}
+                    ]
+                    
+                    text = llm_service.tokenizer.apply_chat_template(
+                        prompt,
+                        tokenize=False,
+                        add_generation_prompt=True
+                    )
+
+                    inputs = llm_service.tokenizer(
+                        text,
+                        return_tensors="pt",
+                        truncation=True,
+                        max_length=8192
+                    ).to(llm_service.model.device)
+                    
+                    outputs = llm_service.model.generate(
+                        **inputs,
+                        max_new_tokens=4096,
+                        do_sample=True,
+                        temperature=0.1,
+                        top_p=0.9,
+                        repetition_penalty=1.15,
+                        pad_token_id=llm_service.tokenizer.eos_token_id
+                    )
+                    
+                    response = llm_service.tokenizer.decode(
+                        outputs[0][len(inputs.input_ids[0]):],
+                        skip_special_tokens=True
+                    )
+                    return response.strip()
+
+            finally:
+                # Always restore the original model name (e.g. gemini)
+                llm_service.model_name = original_name
 
         return await asyncio.to_thread(_sync_generate)
 

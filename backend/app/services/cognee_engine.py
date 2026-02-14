@@ -197,23 +197,66 @@ class CogneeEngine:
             
             # Create database tables if they don't exist
             # Cognee 0.5.x patch: create_db_and_tables is synchronous -- Correction: It IS async in this env
+            # Create database tables if they don't exist
+            # Cognee 0.5.x patch: create_db_and_tables is synchronous -- Correction: It IS async in this env
             try:
                 await create_db_and_tables()
-                logger.info("✅ Cognee database tables created/verified via standard method.")
+                
+                # VERIFICATION: Check if tables actually exist
+                # Cognee 0.5.x sometimes fails silently on async init
+                import sqlalchemy
+                from sqlalchemy import inspect
+                from cognee.infrastructure.databases.relational import get_relational_engine
+                
+                engine = get_relational_engine()
+                
+                def _check_tables(sync_engine):
+                    inspector = inspect(sync_engine)
+                    return inspector.get_table_names()
+
+                # Run inspection in thread to avoid blocking loop if using sync engine
+                # Note: engine might be AsyncEngine, so we need to be careful.
+                # Inspect works on sync engines or connections.
+                
+                # If engine is AsyncEngine, we must use run_sync
+                missing_tables = False
+                try:
+                    async with engine.connect() as conn:
+                        existing_tables = await conn.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
+                        required_tables = {"principals", "users", "datasets"}
+                        missing = required_tables - set(existing_tables)
+                        if missing:
+                            logger.warning(f"⚠️ Post-initialization check: Missing tables: {missing}")
+                            missing_tables = True
+                        else:
+                            logger.info("✅ Cognee database tables verified successfully.")
+                except Exception as inspect_err:
+                     logger.warning(f"⚠️ Table inspection failed ({inspect_err}). Assuming tables missing.")
+                     missing_tables = True
+
+                if missing_tables:
+                     raise Exception("Forcing manual table creation due to missing tables.")
+
             except Exception as e:
-                logger.error(f"⚠️ Standard create_db_and_tables failed: {e}. Attempting manual table creation.")
+                logger.error(f"⚠️ Standard create_db_and_tables failed or incomplete: {e}. Attempting manual table creation.")
                 
                 # --- MANUAL FALLBACK FOR TABLE CREATION ---
                 try:
-                    from cognee.infrastructure.databases.relational import get_relational_engine, Base
+                    from cognee.infrastructure.databases.relational import get_relational_engine
+                    # Import Base from where models are defined to ensure metadata is populated
+                    from cognee.modules.users.models import User
+                    from cognee.modules.data.models import Dataset
+                    from cognee.infrastructure.databases.relational import Base
+
                     engine = get_relational_engine()
                     # Ensure we are using async methods on AsyncEngine
                     async with engine.begin() as conn:
-                        logger.info("🔧 Running manual DDL for Cognee tables...")
+                        logger.info("🔧 Running manual DDL for Cognee tables (Hard Fallback)...")
                         await conn.run_sync(Base.metadata.create_all)
                     logger.info("✅ Cognee database tables manually created.")
                 except Exception as manual_error:
                     logger.critical(f"❌ Failed to manually create tables: {manual_error}")
+                    # We re-raise because if this fails, the app is dead anyway
                     raise manual_error
 
             # INFO: Cognee 0.5.x might create a random default user if none exists.
