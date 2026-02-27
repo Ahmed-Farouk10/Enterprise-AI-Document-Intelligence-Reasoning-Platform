@@ -43,6 +43,12 @@ RUN python -c "import cognee; print('Cognee installed:', cognee.__version__)"
 # Using --with-deps to install system dependencies (requires root, which we are)
 RUN playwright install --with-deps chromium
 
+# Pre-download Models to speed up HF Spaces startup
+# This bakes the Embedding Model and LLM Tokenizer into the Docker image
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')" && \
+    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('Qwen/Qwen2.5-72B-Instruct', trust_remote_code=True)"
+
+
 # Copy application code
 ENV DEPLOY_TIMESTAMP=20240208_2030
 COPY --chown=appuser:appuser . .
