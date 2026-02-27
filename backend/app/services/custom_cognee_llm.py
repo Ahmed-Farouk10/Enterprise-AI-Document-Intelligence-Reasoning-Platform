@@ -221,20 +221,8 @@ OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
                 
                 # 3. Branch: Local In-Memory vs. Inference API
                 if llm_service.model is None:
-                    # HF Spaces Mode: Model didn't load. Use Inference API.
-                    logger.info(f"🌐 HF Spaces detected. Using Inference API for {llm_service.model_name}...")
-                    
-                    # Prepare messages for the API
-                    messages = [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user}
-                    ]
-                    # Reuse the service's API method
-                    return llm_service._generate_via_inference_api(
-                        prompt=messages,
-                        max_tokens=4096,
-                        temperature=0.1
-                    )
+                    # HF Spaces Mode: Model didn't load. Cannot run locally!
+                    raise RuntimeError(f"Local LLM model is not loaded (HF Spaces mode). Cannot execute local fallback for {llm_service.model_name}.")
                 else:
                     # Local In-Memory Mode
                     logger.info("🛡️ Using In-Memory Local Model...")

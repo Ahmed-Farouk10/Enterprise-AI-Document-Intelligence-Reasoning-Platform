@@ -49,6 +49,8 @@ def verify_cognee_setup():
     # Storage paths
     os.environ["COGNEE_STORAGE_PATH"] = DATA_PATH
     os.environ["COGNEE_FILES_PATH"] = DATA_PATH  # Newer cognee variable
+    os.environ["COGNEE_SYSTEM_DIR"] = os.path.join(COGNEE_ROOT, ".cognee_system")
+    os.environ["ANONYMOUS_ID_PATH"] = os.path.join(COGNEE_ROOT, ".anon_id")
     
     # 4. Configure Gemini (LLM)
     # 4. Configure LLM Defaults (Aggressive Sanitization)
@@ -64,10 +66,10 @@ def verify_cognee_setup():
         os.environ["COGNEE_LLM_PROVIDER"] = "huggingface"
         
     if not os.getenv("LLM_MODEL") or "gemini" in os.getenv("LLM_MODEL", "").lower():
-        os.environ["LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct"
+        os.environ["LLM_MODEL"] = "Qwen/Qwen2.5-7B-Instruct"
         
     if not os.getenv("COGNEE_LLM_MODEL") or "gemini" in os.getenv("COGNEE_LLM_MODEL", "").lower():
-        os.environ["COGNEE_LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct"
+        os.environ["COGNEE_LLM_MODEL"] = "Qwen/Qwen2.5-7B-Instruct"
 
     # Ensure Key is present (HF_TOKEN preferred)
     if not os.getenv("LLM_API_KEY") or os.getenv("LLM_API_KEY").startswith("AIza"):
