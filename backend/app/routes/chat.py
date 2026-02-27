@@ -13,8 +13,6 @@ from app.db.database import get_db, SessionLocal
 from app.db.service import DatabaseService
 from app.services.cache import cache_service
 from app.core.rate_limiter import limiter
-from app.services.retreival import vector_store
-from app.services.knowledge_graph import kg_service
 from app.services.cognee_engine import cognee_engine, AnalysisMode, GraphQueryResult
 from app.services.verification_service import get_verification_service
 import json
@@ -420,12 +418,6 @@ async def stream_message(
             if relevant_memories:
                  yield _sse_event("reasoning", f"🧠 Recalled {len(relevant_memories)} relevant facts from memory.")
 
-            # Phase 2: Synthesis
-            if retrieval_method == "cognee" or retrieval_method == "hybrid":
-                yield _sse_event("status", "Synthesizing answer from graph connections...")
-            else:
-                yield _sse_event("status", "Synthesizing answer from retrieved documents...")
-            
             # Stream generation
             async for token in _async_stream_wrapper(
                 llm.generate_stream(system_prompt, scoped_context, message_data.content)
@@ -522,40 +514,58 @@ async def stream_message(
 
 async def _get_retrieved_context(query: str, depth: str, document_ids: List[str] = []) -> Dict[str, Any]:
     """
-    Retrieve context using the new HybridSearchService (Vector + Graph Fusion).
+    Retrieve context using Cognee Search.
     """
-    from app.services.hybrid_search_service import hybrid_search_service, SearchConfig
-    
-    # Configure search based on depth/intent
-    config = SearchConfig()
-    
-    if depth == LLMService.DEPTH_EVALUATIVE:
-        config.graph_weight = 0.5  # Higher graph weight for detailed evaluation
-        config.hops = 2            # Deeper traversal
-    elif depth == LLMService.DEPTH_IMPROVEMENT:
-        config.alpha = 0.4         # More keyword focus to find specific errors
-        config.graph_weight = 0.3
+    import logging
+    logger = logging.getLogger(__name__)
     
     try:
-        # execute hybrid search
-        result = await hybrid_search_service.search(
-            query=query,
-            document_ids=document_ids,
-            config=config
-        )
+        # execute Cognee search
+        from cognee.api.v1.search import SearchType
+        from app.services.cognee_engine import cognee_engine
+        
+        # Directly use cognee_engine search which is correctly configured
+        results = await cognee_engine.search_documents(query_text=query, limit=10)
+        
+        if not results:
+             return {
+                "full_context": "No relevant context found.",
+                "document_name": "Cognee Knowledge Base",
+                "confidence": 0.0,
+                "entities": [],
+                "graph_evidence": [],
+                "retrieval_method": "cognee"
+            }
+        
+        # Format the cognee output into string context
+        context_texts = []
+        entities = []
+        for res in results:
+             # Basic extraction, structure varies by Cognee version / dataset
+             if hasattr(res, 'text'):
+                  context_texts.append(res.text)
+             elif isinstance(res, dict) and 'text' in res:
+                  context_texts.append(res['text'])
+             else:
+                  context_texts.append(str(res))
+                  
+             # Try grabbing entities if they exist
+             if hasattr(res, 'metadata') and hasattr(res.metadata, 'entity_name'):
+                  entities.append({"name": res.metadata.entity_name})
+
+        full_context = "\n\n".join(context_texts)
         
         return {
-            "full_context": result["full_context"],
-            "document_name": "Hybrid Knowledge Base",
-            "confidence": result["confidence"],
-            "entities": [{"name": e} for e in result["entities"]],
-            "graph_evidence": [], # populated by graph expansion
-            "retrieval_method": "hybrid_fusion"
+            "full_context": full_context,
+            "document_name": "Cognee Knowledge Base",
+            "confidence": 0.8, # Estimated
+            "entities": entities,
+            "graph_evidence": [],
+            "retrieval_method": "cognee"
         }
         
     except Exception as e:
-        logger.error(f"Hybrid search failed: {e}", exc_info=True)
-        # Fallback to simple vector search if everything explodes
+        logger.error(f"Cognee search failed: {e}", exc_info=True)
         return {
             "full_context": "Error retrieving context. Please try again.",
             "document_name": "Error",

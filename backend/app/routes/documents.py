@@ -10,7 +10,6 @@ from app.schemas import DocumentResponse, PaginatedDocuments
 from app.db.database import get_db
 from app.db.models import Document
 from app.db.service import DatabaseService
-from app.services.retreival import vector_store
 from app.core.rate_limiter import limiter
 from app.core.logging_config import get_logger
 import uuid
@@ -40,12 +39,8 @@ async def process_document_background(document_id: str, file_path: Path, mime_ty
                 from app.services.ocr import ocr_service
                 text = ocr_service.extract_text(file_path, mime_type)
                 
-                # Index in vector store
+                # Index in Cognee graph
                 if text and len(text.strip()) > 10:
-                    from app.services.retreival import vector_store
-                    vector_store.add_document(text=text, doc_id=document.id, doc_name=original_filename)
-                    vector_store.save_index()
-                    
                     # Graph Processing (Cognee)
                     try:
                         from app.services.cognee_engine import cognee_engine

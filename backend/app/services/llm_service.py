@@ -356,11 +356,52 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             yield "\n[STREAM_END]"
             self._record_success()
             
+            yield "\n[STREAM_END]"
+            self._record_success()
+            
         except Exception as e:
             self._record_failure()
             logger.error(f"HF Inference API Stream failed: {e}")
             yield f"\n⚠️ [ERROR] Inference API failed: {str(e)}"
             yield "\n[STREAM_END]"
+
+    def _generate_via_groq(
+        self,
+        prompt: Any,
+        model: str = "groq/llama3-70b-8192",
+        max_tokens: int = 4096,
+        temperature: float = 0.1
+    ) -> str:
+        """
+        Generate using Groq API via LiteLLM.
+        """
+        try:
+            import litellm
+            # litellm.drop_params = True # prevent sending unsupported params if any
+            
+            if not os.getenv("GROQ_API_KEY"):
+                raise ValueError("GROQ_API_KEY not found in environment")
+                
+            # Format inputs
+            if isinstance(prompt, str):
+                messages = [{"role": "user", "content": prompt}]
+            else:
+                messages = prompt
+            
+            logger.info(f"⚡ Calling Groq API ({model}) via LiteLLM...")
+            response = litellm.completion(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                api_key=os.getenv("GROQ_API_KEY")
+            )
+            
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            logger.error(f"❌ Groq API failed: {e}")
+            raise e
 
     # ==================== INTENT & SCOPE CLASSIFICATION ====================
     
