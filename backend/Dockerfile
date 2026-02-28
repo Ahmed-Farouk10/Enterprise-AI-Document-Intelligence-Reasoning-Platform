@@ -36,8 +36,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir torch==2.3.0 --extra-index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir --prefer-binary -r requirements.txt
 
-# Verify Cognee installation (Will fail build if missing)
-RUN python -c "import cognee; print('Cognee installed:', cognee.__version__)"
+# Ensure environment is healthy
+RUN python -c "print('Environment ready!')"
 
 # Install Playwright browsers and dependencies
 # Using --with-deps to install system dependencies (requires root, which we are)

@@ -45,10 +45,9 @@ google-generativeai>=0.3.2
 aiosqlite>=0.20.0
 
 
-# Graph RAG Core
-cognee[neo4j]==0.5.2
+# Graph RAG Core (Simplified Phase 2)
+# Cognee and Neo4j removed in favor of pure RAG with LanceDB
 lancedb>=0.17.0
-neo4j>=5.14.0
 networkx>=3.1.0
 huggingface-hub>=0.20.0
 fastapi-users>=14.0.1

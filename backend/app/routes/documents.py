@@ -39,63 +39,59 @@ async def process_document_background(document_id: str, file_path: Path, mime_ty
                 from app.services.ocr import ocr_service
                 text = ocr_service.extract_text(file_path, mime_type)
                 
-                # Index in Cognee graph
+                # Index in Vector Database
                 if text and len(text.strip()) > 10:
-                    # Graph Processing (Cognee)
                     try:
-                        from app.services.cognee_engine import cognee_engine
-                        logger.info(f" Processing graph for {document_id}")
+                        # 1. Store chunks in LanceDB
+                        from app.services.vector_store import vector_store_service
+                        logger.info(f"💾 Vectorizing document {document_id}")
                         
-                        document_graph = await cognee_engine.ingest_document_professional(
-                            document_text=text,
+                        metadata = {
+                            "filename": original_filename,
+                            "upload_date": document.created_at.isoformat(),
+                            "mime_type": mime_type
+                        }
+                        
+                        chunks_inserted = await vector_store_service.ingest_document(
                             document_id=str(document.id),
-                            document_type="auto_detect",
-                            metadata={
-                                "filename": original_filename,
-                                "upload_date": document.created_at.isoformat(),
-                                "mime_type": mime_type
-                            }
+                            text=text,
+                            metadata=metadata
+                        )
+                        
+                        # 2. Extract structured entities (Resumes, Invoices, etc.)
+                        from app.services.cognee_pipelines import route_to_pipeline
+                        logger.info(f" Extracted structured entities for {document_id}")
+                        
+                        pipeline_result = await route_to_pipeline(
+                            text=text,
+                            document_id=str(document.id),
+                            document_type="auto_detect"
                         )
                         
                         # Extract stats safely
-                        is_success = False
-                        error_msg = None
-                        
-                        # Check success and extract error message if present
-                        if hasattr(document_graph, 'success'): 
-                            is_success = document_graph.success
-                            error_msg = getattr(document_graph, 'error_message', None)
-                        elif isinstance(document_graph, dict):
-                            # Check success OR status (for pipelines)
-                            is_success = document_graph.get('success', False) or (document_graph.get('status') in ['completed', 'partial_success'])
-                            # Check for 'error' (pipelines) or 'error_message' (engine)
-                            error_msg = document_graph.get('error') or document_graph.get('error_message')
+                        is_success = chunks_inserted > 0
+                        error_msg = pipeline_result.error if not pipeline_result.success else None
                         
                         if is_success:
-                           def get_val(obj, key, default):
-                               if isinstance(obj, dict): return obj.get(key, default)
-                               return getattr(obj, key, default)
-
                            extra_data = {
                                 "graph_stats": {
-                                    "entity_count": get_val(document_graph, "entity_count", 0),
-                                    "document_type": get_val(document_graph, "document_type", "unknown"),
-                                    "dataset_name": get_val(document_graph, "dataset_name", ""),
-                                    "entities": get_val(document_graph, "entities", {})
+                                    "entity_count": chunks_inserted, # Use chunks indexed as "entity" equivalent
+                                    "document_type": pipeline_result.document_type,
+                                    "dataset_name": pipeline_result.dataset,
+                                    "entities": pipeline_result.entities or {} # Contains resume counts etc
                                 }
                            }
                            
-                           # Store warning if graph failed but ingestion "succeeded"
                            if error_msg:
-                               extra_data["cognee_warning"] = str(error_msg)
-                               logger.warning(f"⚠️ Partial success for {document_id}: {error_msg}")
+                               extra_data["extraction_warning"] = str(error_msg)
+                               logger.warning(f"⚠️ Partial success for {document_id}: Extraction failed - {error_msg}")
                            
                            document.extra_data = extra_data
                     
-                    except Exception as cognee_error:
-                         logger.error(f"⚠️ Cognee failed: {cognee_error}")
+                    except Exception as store_error:
+                         logger.error(f"⚠️ Vector insertion failed: {store_error}")
                          if not document.extra_data: document.extra_data = {}
-                         document.extra_data["cognee_error"] = str(cognee_error)
+                         document.extra_data["vector_error"] = str(store_error)
 
                     document.status = "completed"
                     logger.info(f"✅ Document {document_id} processing complete")

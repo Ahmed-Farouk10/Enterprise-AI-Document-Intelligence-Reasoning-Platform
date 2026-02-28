@@ -514,58 +514,51 @@ async def stream_message(
 
 async def _get_retrieved_context(query: str, depth: str, document_ids: List[str] = []) -> Dict[str, Any]:
     """
-    Retrieve context using Cognee Search.
+    Retrieve context using LanceDB Vector Search.
     """
     import logging
     logger = logging.getLogger(__name__)
     
     try:
-        # execute Cognee search
-        from cognee.api.v1.search import SearchType
-        from app.services.cognee_engine import cognee_engine
+        from app.services.vector_store import vector_store_service
         
-        # Directly use cognee_engine search which is correctly configured
-        results = await cognee_engine.search_documents(query_text=query, limit=10)
+        # Determine number of chunks to fetch based on explicit depth config
+        limit = 5
+        if depth == "deep": limit = 15
+        elif depth == "comprehensive": limit = 25
+        
+        doc_id = document_ids[0] if document_ids else None
+        
+        # Execute LanceDB Search
+        results = await vector_store_service.search(query=query, limit=limit, document_id=doc_id)
         
         if not results:
              return {
                 "full_context": "No relevant context found.",
-                "document_name": "Cognee Knowledge Base",
+                "document_name": "Vector Store Base",
                 "confidence": 0.0,
                 "entities": [],
                 "graph_evidence": [],
-                "retrieval_method": "cognee"
+                "retrieval_method": "vector_store"
             }
         
-        # Format the cognee output into string context
-        context_texts = []
-        entities = []
-        for res in results:
-             # Basic extraction, structure varies by Cognee version / dataset
-             if hasattr(res, 'text'):
-                  context_texts.append(res.text)
-             elif isinstance(res, dict) and 'text' in res:
-                  context_texts.append(res['text'])
-             else:
-                  context_texts.append(str(res))
-                  
-             # Try grabbing entities if they exist
-             if hasattr(res, 'metadata') and hasattr(res.metadata, 'entity_name'):
-                  entities.append({"name": res.metadata.entity_name})
-
-        full_context = "\n\n".join(context_texts)
+        # Format the output into string context
+        context_texts = [res["text"] for res in results]
+        full_context = "\n---\n".join(context_texts)
         
+        # We don't extract strict entities anymore natively here, 
+        # but structured entity metadata from extraction can be loaded if needed.
         return {
             "full_context": full_context,
-            "document_name": "Cognee Knowledge Base",
-            "confidence": 0.8, # Estimated
-            "entities": entities,
+            "document_name": "RAG Document Base",
+            "confidence": 1.0 - (results[0]["distance"] if results else 0.5), # Inverse of LanceDB distance L2 metric estimate
+            "entities": [],
             "graph_evidence": [],
-            "retrieval_method": "cognee"
+            "retrieval_method": "vector_store"
         }
         
     except Exception as e:
-        logger.error(f"Cognee search failed: {e}", exc_info=True)
+        logger.error(f"Vector search failed: {e}", exc_info=True)
         return {
             "full_context": "Error retrieving context. Please try again.",
             "document_name": "Error",
