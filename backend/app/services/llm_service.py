@@ -520,6 +520,8 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                frequency_penalty=0.5,
+                stop=["<|eot_id|>", "</s>", "<|im_end|>", "<eos>"]
             )
             return response.choices[0].message.content
             
@@ -546,6 +548,8 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                frequency_penalty=0.5,
+                stop=["<|eot_id|>", "</s>", "<|im_end|>", "<eos>"],
                 stream=True
             )
             
@@ -900,7 +904,7 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         document_context: str,
         question: str,
         max_new_tokens: int = 2048,
-        temperature: float = 0.05  # Very low for factual accuracy
+        temperature: float = 0.2  # Low enough for factual accuracy, high enough to prevent vocab loops
     ) -> Generator[str, None, None]:
         """
         Streaming generation for UX responsiveness.
