@@ -33,7 +33,7 @@ COPY requirements.txt .
 # Install dependencies in a single layer with CPU-specific torch
 # Using --prefer-binary to speed up build and avoid hung compilations
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir torch==2.3.0 --extra-index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir torch==2.4.0 --extra-index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir --prefer-binary -r requirements.txt
 
 # Ensure environment is healthy
