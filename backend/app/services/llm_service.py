@@ -178,6 +178,12 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                      logger.info("⚡ Low Memory Mode: Skipping local tokenizer load (Will rely on API)")
                      return
 
+                # Skip for OpenRouter or non-HF Repo ID formats
+                provider = os.getenv("LLM_PROVIDER", "").lower()
+                if provider in ["openrouter", "openai"] or "/" in self.model_name and not self.model_name.startswith(("Qwen", "microsoft", "meta-llama", "mistralai")):
+                     logger.info(f"⚡ Skipping local tokenizer load for remote provider API model: {self.model_name}")
+                     return
+
                 # Only load tokenizer for text processing
                 try:
                     self.tokenizer = AutoTokenizer.from_pretrained(
@@ -476,13 +482,14 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         api_key = os.getenv("OPENROUTER_API_KEY") 
         if not api_key:
              llm_key = os.getenv("LLM_API_KEY", "")
-             if llm_key.startswith("sk-or-"):
+             # If provider is explicitly openrouter or key looks like one, inherit the key
+             if llm_key.startswith("sk-or-") or os.getenv("LLM_PROVIDER", "").lower() == "openrouter":
                  api_key = llm_key
                  
         if api_key or os.getenv("LLM_PROVIDER", "").lower() == "openrouter":
              return openai.OpenAI(
                  base_url="https://openrouter.ai/api/v1",
-                 api_key=api_key or "dummy"
+                 api_key=api_key or "local"  # Prevent 'dummy' since 'local' will be caught better by underlying errors if it breaks
              )
              
         # Defaults to Generic OpenAI
