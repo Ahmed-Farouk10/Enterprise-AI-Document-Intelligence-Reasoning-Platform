@@ -47,9 +47,8 @@ RUN python -c "print('Environment ready!')"
 RUN playwright install --with-deps chromium
 
 # Pre-download Models to speed up HF Spaces startup
-# This bakes the Embedding Model and the Tiny Local Fallback Model into the Docker image
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')" && \
-    python -c "from transformers import AutoTokenizer, AutoModelForCausalLM; AutoTokenizer.from_pretrained('Qwen/Qwen2.5-1.5B-Instruct', trust_remote_code=True); AutoModelForCausalLM.from_pretrained('Qwen/Qwen2.5-1.5B-Instruct', trust_remote_code=True)"
+# This bakes the Embedding Model into the Docker image
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
 
 # Fix permissions on downloaded cache so app user can access it
 RUN chown -R appuser:appuser /app/.cache
