@@ -208,10 +208,10 @@ OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
             # 1. Ensure we are targeting the Local Model (Qwen), not Gemini
             # We temporarily swap the model name so that if we use Inference API, it uses Qwen.
             original_name = llm_service.model_name
-            target_local_model = "Qwen/Qwen2.5-7B-Instruct"
+            target_local_model = "Qwen/Qwen2.5-1.5B-Instruct"
             
-            # If currently configured for Gemini, switch to Qwen for this call
-            if "gemini" in original_name.lower():
+            # Switch to the tiny local model for fallback
+            if llm_service.model_name != target_local_model:
                  llm_service.model_name = target_local_model
 
             try:
@@ -226,7 +226,7 @@ OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
                     raise RuntimeError(f"Local LLM model is not loaded (HF Spaces mode). Cannot execute local fallback for {llm_service.model_name}.")
                 else:
                     # Local In-Memory Mode
-                    logger.info("🛡️ Using In-Memory Local Model...")
+                    logger.info(f"🛡️ Using In-Memory Local Model ({llm_service.model_name})...")
                     
                     prompt = [
                         {"role": "system", "content": system},

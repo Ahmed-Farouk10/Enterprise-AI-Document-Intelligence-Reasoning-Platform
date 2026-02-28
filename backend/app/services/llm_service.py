@@ -166,8 +166,11 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             # Check if running on HuggingFace Spaces (limited resources)
             is_hf_spaces = os.getenv("SPACE_ID") or os.getenv("HF_HOME", "").startswith("/app/.cache")
             
-            if is_hf_spaces:
-                logger.warning(f"🌐 Running on HuggingFace Spaces - Skipping local model load for {self.model_name}")
+            # Tiny models that are safe to load in 16GB free-tier HF Spaces RAM
+            tiny_models = ["Qwen/Qwen2.5-1.5B-Instruct", "microsoft/phi-1_5"]
+            
+            if is_hf_spaces and self.model_name not in tiny_models:
+                logger.warning(f"🌐 Running on HuggingFace Spaces - Skipping local model load for large model {self.model_name}")
                 logger.warning("💡 Will use HuggingFace Inference API for completions")
                 
                 # MEMORY OPTIMIZATION: Skip tokenizer if low memory mode is enabled
