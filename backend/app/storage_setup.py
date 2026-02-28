@@ -23,7 +23,7 @@ def verify_storage_setup():
     # 1. Ensure basic working directories exist (for Vector DB and SQLite)
     os.makedirs(DB_PATH, mode=0o777, exist_ok=True)
 
-    # 2. Configure LLM Defaults
+    # Configure LLM Defaults
     current_provider = os.getenv("LLM_PROVIDER", "").lower()
     if not current_provider:
         os.environ["LLM_PROVIDER"] = "huggingface"
@@ -31,12 +31,8 @@ def verify_storage_setup():
     if not os.getenv("LLM_MODEL"):
         os.environ["LLM_MODEL"] = "Qwen/Qwen2.5-7B-Instruct"
 
-    # Ensure Key is present (HF_TOKEN preferred)
-    if not os.getenv("LLM_API_KEY") or os.getenv("LLM_API_KEY").startswith("AIza"):
-        if os.getenv("HF_TOKEN"):
-             os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN")
-        else:
-             os.environ["LLM_API_KEY"] = "local" # Fallback prevents crash
+    if not os.getenv("LLM_API_KEY"):
+         os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN") or "local"
     
     log(f"[SETUP] Basic LLM Configuration Complete.")
 

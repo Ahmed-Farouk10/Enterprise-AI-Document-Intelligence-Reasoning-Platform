@@ -13,15 +13,7 @@ if not os.getenv("LLM_API_KEY"):
         print("⚠️ No LLM_API_KEY or HF_TOKEN found. Rag may fail LLM connection tests.")
 
 # --- FAILSAFE: Force Clean Env Vars ---
-if "gemini" in os.getenv("LLM_PROVIDER", "").lower():
-    os.environ["LLM_PROVIDER"] = "huggingface"
-if "gemini" in os.getenv("RAG_LLM_PROVIDER", "").lower():
-    os.environ["RAG_LLM_PROVIDER"] = "huggingface"
-    
-if "gemini" in os.getenv("LLM_MODEL", "").lower():
-    os.environ["LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct"
-if "gemini" in os.getenv("RAG_LLM_MODEL", "").lower():
-    os.environ["RAG_LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct" 
+# Removed aggressive overrides to allow custom OpenRouter/Gemini configurations
 # --------------------------------------
 
 # --- CRITICAL: INHERIT FROM CENTRAL SETUP ---
