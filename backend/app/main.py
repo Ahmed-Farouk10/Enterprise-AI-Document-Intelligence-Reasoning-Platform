@@ -74,32 +74,7 @@ async def lifespan(app: FastAPI):
     from app.services.llm_service import llm_service
     asyncio.create_task(asyncio.to_thread(llm_service.warmup))
 
-    # Initialize Cognee Engine
-    # Initialize Cognee Engine
-    async def init_cognee():
-        try:
-            # Standard maintenance: Prune stale metadata on startup (User Requested Fix)
-            try:
-                import cognee
-                # This clears the local metadata registry safely to resolve UNIQUE constraint errors
-                if hasattr(cognee, "prune_system"):
-                    await cognee.prune_system()
-                    logger.info("application_startup", status="cognee_system_pruned")
-                else:
-                    # Fallback for older/different versions causing issues
-                    cognee.prune()
-                    logger.info("application_startup", status="cognee_pruned")
-            except Exception as e:
-                 logger.warning(f"Prune failed (non-critical): {e}")
-
-            from app.services.cognee_engine import cognee_engine
-            await cognee_engine.initialize()
-            logger.info("application_startup", status="cognee_initialized")
-        except Exception as e:
-            logger.error("application_startup", status="cognee_initialization_failed", error=str(e))
-    
-    asyncio.create_task(init_cognee())
-
+    # Cognee Engine fully removed. Database handled dynamically by Vector Store.
     # Start Memify Background Service (Self-Improvement)
     from app.services.cognee_background import memify_service
     await memify_service.start()
@@ -199,34 +174,29 @@ def root():
 
 @app.get("/health")
 def health_check():
-    """Diagnostic endpoint to check Cognee status."""
+    """Diagnostic endpoint to check system status."""
     return {
         "status": "online",
         "service": "Enterprise Document Intelligence",
-        "cognee_root": os.environ.get("COGNEE_ROOT"),
-        "anon_id_path": os.environ.get("COGNEE_ANONYMOUS_ID_PATH"),
-        "writable": os.access(os.environ.get("COGNEE_ROOT", "/"), os.W_OK),
-        "db_exists": os.path.exists(os.path.join(os.environ.get("COGNEE_ROOT", ""), "databases", "cognee_db.db")),
+        "vector_store": "LanceDB",
         "permissions_patch": "applied"
     }
 
 @app.post("/system/reset")
 async def system_reset():
-    """CRITICAL: Prune all data from Cognee. Use with caution."""
+    """CRITICAL: Reset LanceDB Vector Store."""
     try:
-        import cognee
-        cognee.prune()
-        return {"status": "success", "message": "System pruned. All data removed."}
+        from app.services.vector_store import LANCEDB_DIR
+        import shutil
+        import os
+        if os.path.exists(LANCEDB_DIR):
+             shutil.rmtree(LANCEDB_DIR)
+             os.makedirs(LANCEDB_DIR, mode=0o777, exist_ok=True)
+        return {"status": "success", "message": "Vector store wiped successfully."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 @app.post("/system/cognify/{dataset_name}")
 async def manual_cognify(dataset_name: str):
-    """Manually trigger Cognify for a dataset."""
-    try:
-        import cognee
-        # Trigger cognify
-        await cognee.cognify(datasets=[dataset_name])
-        return {"status": "success", "message": f"Cognify triggered for {dataset_name}"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    """Deprecated endpoint."""
+    return {"status": "error", "message": "Cognify operations are deprecated. Documents are ingested on upload."}

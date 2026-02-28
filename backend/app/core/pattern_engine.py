@@ -17,7 +17,7 @@ class PatternEngine:
         Identify recurring patterns across all documents using Cognee.
         """
         try:
-            import cognee
+            # import cognee
             from app.core.cognee_config import settings as cognee_settings
             from cognee.modules.users.models import User
             import uuid
@@ -38,7 +38,7 @@ class PatternEngine:
         Memory consolidation: behaviors.
         """
         try:
-            import cognee
+            # import cognee
             from app.core.cognee_config import settings as cognee_settings
             from cognee.modules.users.models import User
             import uuid
@@ -57,7 +57,7 @@ class PatternEngine:
         """
         if feedback.get("rating") == "negative":
             try:
-                import cognee
+                # import cognee
                 from app.core.cognee_config import settings as cognee_settings
                 from cognee.modules.users.models import User
                 import uuid

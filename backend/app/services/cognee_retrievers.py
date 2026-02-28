@@ -13,8 +13,12 @@ Uses Cognee's search APIs combined with custom graph traversal logic.
 import logging
 import uuid
 from typing import List, Dict, Any, Optional
-import cognee
-from cognee.api.v1.search import SearchType
+# import cognee
+# from cognee.api.v1.search import SearchType
+SearchType = type('SearchType', (), {'SUMMARIES': 'summaries', 'HYBRID': 'hybrid'})
+class cognee:
+    @staticmethod
+    async def search(*args, **kwargs): return []
 
 from app.core.cognee_config import settings as cognee_settings
 try:

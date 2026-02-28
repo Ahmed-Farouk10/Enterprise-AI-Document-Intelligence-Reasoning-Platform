@@ -2,7 +2,6 @@ import asyncio
 import logging
 import uuid
 from typing import List, Set
-import cognee
 from app.core.cognee_config import settings as cognee_settings
 
 try:

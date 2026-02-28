@@ -11,7 +11,7 @@ import uuid
 
 # Cognee imports
 try:
-    import cognee
+    # import cognee
     # SearchType for entity/relationship queries
     from cognee.api.v1.search import SearchType
     COGNEE_AVAILABLE = True
@@ -229,8 +229,8 @@ class CogneeEngine:
             
             # Initialize Cognee's internal database (creates tables, default user, etc.)
             # This is required before any add() or cognify() operations
-            import cognee
-            from cognee.infrastructure.databases.relational import create_db_and_tables
+            # import cognee
+            # from cognee.infrastructure.databases.relational import create_db_and_tables
             
             # Create database tables if they don't exist
             # Cognee 0.5.x patch: create_db_and_tables is synchronous -- Correction: It IS async in this env

@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
 try:
-    import cognee
+    # import cognee
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
     from cognee.modules.pipelines import Task, run_pipeline
     from cognee.tasks.storage import add_data_points
