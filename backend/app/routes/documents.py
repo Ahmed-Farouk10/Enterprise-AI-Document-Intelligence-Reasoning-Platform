@@ -89,9 +89,12 @@ async def process_document_background(document_id: str, file_path: Path, mime_ty
                            document.extra_data = extra_data
                     
                     except Exception as store_error:
-                         logger.error(f"⚠️ Vector insertion failed: {store_error}")
+                         logger.error(f"⚠️ Vector insertion failed: {store_error}", exc_info=True)
                          if not document.extra_data: document.extra_data = {}
                          document.extra_data["vector_error"] = str(store_error)
+                         document.status = "failed"
+                         db.commit()
+                         return
 
                     document.status = "completed"
                     logger.info(f"✅ Document {document_id} processing complete")

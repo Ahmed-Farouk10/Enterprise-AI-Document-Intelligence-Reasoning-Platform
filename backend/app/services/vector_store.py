@@ -83,7 +83,13 @@ class VectorStoreService:
              })
              
         table = self.get_table()
-        table.add(data_to_insert)
+        try:
+            table.add(data_to_insert)
+        except Exception as e:
+            logger.error(f"❌ LanceDB insertion error: {e}")
+            if data_to_insert:
+                logger.error(f"Data sample: {data_to_insert[0]}")
+            raise e
         
         logger.info(f"✅ Indexed {len(chunks)} chunks for document {document_id}")
         return len(chunks)
