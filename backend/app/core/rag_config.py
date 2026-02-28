@@ -51,15 +51,6 @@ if os.getenv("HF_TOKEN"):
     # Force HuggingFace Provider for Rag
     os.environ["RAG_LLM_PROVIDER"] = "huggingface"
     os.environ["RAG_LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct" 
-    
-    # AGGRESSIVELY REMOVE GOOGLE KEYS to prevent LiteLLM auto-discovery
-    if "GOOGLE_API_KEY" in os.environ:
-        print("⚠️ Unsetting GOOGLE_API_KEY to prevent conflict")
-        del os.environ["GOOGLE_API_KEY"]
-    if "GEMINI_API_KEY" in os.environ:
-         print("⚠️ Unsetting GEMINI_API_KEY to prevent conflict")
-         del os.environ["GEMINI_API_KEY"]
-
     # Skip LLM connection test on HF Spaces
     os.environ["RAG_SKIP_LLM_TEST"] = "true"
     logger_msg = "⚙️ Rag: Skipping LLM connection test (HF Spaces / no valid token)"
