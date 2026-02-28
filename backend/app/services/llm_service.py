@@ -265,10 +265,16 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         """Fallback for Gemini models on HF Spaces using google-generativeai"""
         try:
             import google.generativeai as genai
+            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
             
-            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("LLM_API_KEY")
-            if not api_key or api_key == "local":
-                 raise ValueError("No valid Gemini API key found in environment (GEMINI_API_KEY/GOOGLE_API_KEY/LLM_API_KEY).")
+            # If no explicit Gemini key, check if LLM_API_KEY exists and is not a HF token
+            if not api_key:
+                fallback_key = os.environ.get("LLM_API_KEY", "")
+                if fallback_key and not fallback_key.startswith("hf_") and fallback_key != "local":
+                    api_key = fallback_key
+
+            if not api_key or api_key == "local" or api_key.startswith("hf_"):
+                 raise ValueError("No valid Google AI API key found. Please add 'GEMINI_API_KEY' to your Hugging Face Space Variables & Secrets.")
                  
             genai.configure(api_key=api_key)
             
@@ -306,10 +312,15 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         """Streaming fallback for Gemini models via native SDK"""
         try:
             import google.generativeai as genai
+            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
             
-            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("LLM_API_KEY")
-            if not api_key or api_key == "local":
-                 raise ValueError("No valid Gemini API key found.")
+            if not api_key:
+                fallback_key = os.environ.get("LLM_API_KEY", "")
+                if fallback_key and not fallback_key.startswith("hf_") and fallback_key != "local":
+                    api_key = fallback_key
+
+            if not api_key or api_key == "local" or api_key.startswith("hf_"):
+                 raise ValueError("No valid Google AI API key found. Please add 'GEMINI_API_KEY' to your Hugging Face Space Variables & Secrets.")
                  
             genai.configure(api_key=api_key)
             
@@ -455,6 +466,90 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             self._record_failure()
             logger.error(f"HF Inference API Stream failed: {e}")
             yield f"\n⚠️ [ERROR] Inference API failed: {str(e)}"
+            yield "\n[STREAM_END]"
+
+    def _get_openai_client(self):
+        """Helper to get an OpenAI compatible client based on environment"""
+        import openai
+        
+        # Check OpenRouter
+        api_key = os.getenv("OPENROUTER_API_KEY") 
+        if not api_key:
+             llm_key = os.getenv("LLM_API_KEY", "")
+             if llm_key.startswith("sk-or-"):
+                 api_key = llm_key
+                 
+        if api_key or os.getenv("LLM_PROVIDER", "").lower() == "openrouter":
+             return openai.OpenAI(
+                 base_url="https://openrouter.ai/api/v1",
+                 api_key=api_key or "dummy"
+             )
+             
+        # Defaults to Generic OpenAI
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY", "")
+        base_url = os.getenv("OPENAI_BASE_URL")
+        
+        return openai.OpenAI(
+            base_url=base_url if base_url else None,
+            api_key=api_key or "local"
+        )
+
+    def _generate_via_openai_compatible(self, prompt: Any, max_tokens: int = 1024, temperature: float = 0.3) -> str:
+        """Route to OpenAI-compatible endpoints like OpenRouter."""
+        try:
+            client = self._get_openai_client()
+            
+            if isinstance(prompt, list):
+                messages = prompt
+            else:
+                messages = [{"role": "user", "content": str(prompt)}]
+                
+            model_name = self.model_name.replace("openrouter/", "")
+            
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            logger.error(f"❌ OpenAI Compatible API failed: {e}")
+            raise e
+
+    def _generate_via_openai_compatible_stream(self, prompt: Any, max_tokens: int = 1024, temperature: float = 0.3) -> Generator[str, None, None]:
+        """Streaming route for OpenAI-compatible endpoints."""
+        try:
+            client = self._get_openai_client()
+            
+            if isinstance(prompt, list):
+                messages = prompt
+            else:
+                messages = [{"role": "user", "content": str(prompt)}]
+                
+            model_name = self.model_name.replace("openrouter/", "")
+            
+            yield "[STREAM_START]\n"
+            
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=True
+            )
+            
+            for chunk in response:
+                token = chunk.choices[0].delta.content if chunk.choices else None
+                if token:
+                    yield token
+                    
+            yield "\n[STREAM_END]"
+            
+        except Exception as e:
+            logger.error(f"❌ OpenAI Compatible API Stream failed: {e}")
+            yield f"\n⚠️ [ERROR] OpenAI API failed: {str(e)}"
             yield "\n[STREAM_END]"
 
     def _generate_via_groq(
@@ -737,9 +832,17 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         
         # If model not loaded (HF Spaces), use Inference API or Gemini SDK
         if self.model is None:
-            if "gemini" in self.model_name.lower() or os.getenv("LLM_PROVIDER", "").lower() == "gemini":
+            provider = os.getenv("LLM_PROVIDER", "").lower()
+            key = os.getenv("LLM_API_KEY", "")
+            
+            if "gemini" in self.model_name.lower() or provider == "gemini":
                 logger.info("⚡ Using Native Gemini SDK for generation")
                 return self._generate_via_gemini_direct(prompt, max_tokens, temperature)
+                
+            if provider in ["openrouter", "openai"] or key.startswith("sk-or-"):
+                logger.info(f"⚡ Using OpenAI-compatible API for {self.model_name}")
+                return self._generate_via_openai_compatible(prompt, max_tokens, temperature)
+                
             logger.info("Using HuggingFace Inference API with chat completions")
             return self._generate_via_inference_api(prompt, max_tokens, temperature, top_p)
 
@@ -799,9 +902,21 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
 
         # Fallback to external APIs if model not loaded
         if self.model is None:
-            if "gemini" in self.model_name.lower() or os.getenv("LLM_PROVIDER", "").lower() == "gemini":
+            provider = os.getenv("LLM_PROVIDER", "").lower()
+            key = os.getenv("LLM_API_KEY", "")
+            
+            if "gemini" in self.model_name.lower() or provider == "gemini":
                 logger.info("⚡ Using Native Gemini SDK for streaming")
                 yield from self._generate_via_gemini_stream(
+                    prompt=messages,
+                    max_tokens=max_new_tokens,
+                    temperature=temperature
+                )
+                return
+                
+            if provider in ["openrouter", "openai"] or key.startswith("sk-or-"):
+                logger.info(f"⚡ Using OpenAI-compatible API for streaming: {self.model_name}")
+                yield from self._generate_via_openai_compatible_stream(
                     prompt=messages,
                     max_tokens=max_new_tokens,
                     temperature=temperature
