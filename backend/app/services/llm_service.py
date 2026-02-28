@@ -835,13 +835,13 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
             provider = os.getenv("LLM_PROVIDER", "").lower()
             key = os.getenv("LLM_API_KEY", "")
             
-            if "gemini" in self.model_name.lower() or provider == "gemini":
-                logger.info("⚡ Using Native Gemini SDK for generation")
-                return self._generate_via_gemini_direct(prompt, max_tokens, temperature)
-                
             if provider in ["openrouter", "openai"] or key.startswith("sk-or-"):
                 logger.info(f"⚡ Using OpenAI-compatible API for {self.model_name}")
                 return self._generate_via_openai_compatible(prompt, max_tokens, temperature)
+                
+            if "gemini" in self.model_name.lower() or provider == "gemini":
+                logger.info("⚡ Using Native Gemini SDK for generation")
+                return self._generate_via_gemini_direct(prompt, max_tokens, temperature)
                 
             logger.info("Using HuggingFace Inference API with chat completions")
             return self._generate_via_inference_api(prompt, max_tokens, temperature, top_p)
@@ -905,18 +905,18 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
             provider = os.getenv("LLM_PROVIDER", "").lower()
             key = os.getenv("LLM_API_KEY", "")
             
-            if "gemini" in self.model_name.lower() or provider == "gemini":
-                logger.info("⚡ Using Native Gemini SDK for streaming")
-                yield from self._generate_via_gemini_stream(
+            if provider in ["openrouter", "openai"] or key.startswith("sk-or-"):
+                logger.info(f"⚡ Using OpenAI-compatible API for streaming: {self.model_name}")
+                yield from self._generate_via_openai_compatible_stream(
                     prompt=messages,
                     max_tokens=max_new_tokens,
                     temperature=temperature
                 )
                 return
                 
-            if provider in ["openrouter", "openai"] or key.startswith("sk-or-"):
-                logger.info(f"⚡ Using OpenAI-compatible API for streaming: {self.model_name}")
-                yield from self._generate_via_openai_compatible_stream(
+            if "gemini" in self.model_name.lower() or provider == "gemini":
+                logger.info("⚡ Using Native Gemini SDK for streaming")
+                yield from self._generate_via_gemini_stream(
                     prompt=messages,
                     max_tokens=max_new_tokens,
                     temperature=temperature
