@@ -739,51 +739,6 @@ async def compare_documents(source_id: str, target_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/documents/{document_id}/trajectory")
-async def get_career_trajectory(document_id: str):
-    """Extract career progression from knowledge graph."""
-    try:
-        trajectory = await cognee_engine.extract_career_trajectory(document_id)
-        return {"document_id": document_id, "trajectory": trajectory}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/documents/{document_id}/graph")
-async def get_document_graph(document_id: str):
-    """Export document knowledge graph for visualization."""
-    try:
-        # In a real scenario, this would return a subgraph
-        return {"document_id": document_id, "nodes": [], "edges": []}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# --- Utility Functions for Cognee ---
-
-def _map_query_to_mode(question: str, requested_mode: str) -> AnalysisMode:
-    """Intelligent mode selection based on question content."""
-    if requested_mode != "auto":
-        mode_map = {
-            "entities": AnalysisMode.ENTITY_EXTRACTION,
-            "temporal": AnalysisMode.TEMPORAL_REASONING,
-            "comparative": AnalysisMode.COMPARATIVE_ANALYSIS,
-            "anomalies": AnalysisMode.ANOMALY_DETECTION,
-            "summary": AnalysisMode.SUMMARIZATION,
-            "relationships": AnalysisMode.RELATIONSHIP_MAPPING
-        }
-        return mode_map.get(requested_mode, AnalysisMode.ENTITY_EXTRACTION)
-    
-    q = question.lower()
-    if any(k in q for k in ["gap", "break", "between", "when", "timeline"]):
-        return AnalysisMode.TEMPORAL_REASONING
-    if any(k in q for k in ["compare", "fit", "match", "against"]):
-        return AnalysisMode.COMPARATIVE_ANALYSIS
-    if any(k in q for k in ["missing", "incomplete", "wrong", "error", "anomaly"]):
-        return AnalysisMode.ANOMALY_DETECTION
-    return AnalysisMode.SUMMARIZATION
-
-
 def _sse_event(event_type: str, content: str, extra: Optional[Dict] = None) -> str:
     """Format Server-Sent Event"""
     import json
