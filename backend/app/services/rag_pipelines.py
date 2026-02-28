@@ -202,8 +202,6 @@ async def extract_resume_entities(text: str) -> Resume:
         >>> print(len(resume.work_history))  # 3
     """
     
-    if not RAG_AVAILABLE:
-        raise RuntimeError("Rag not available - cannot extract entities")
     
     system_prompt = """
     Extract comprehensive structured resume information from the provided text.
@@ -318,8 +316,6 @@ async def extract_skills_detailed(text: str) -> List[Skill]:
         List[Skill]: Detailed skills with levels and experience
     """
     
-    if not RAG_AVAILABLE:
-        raise RuntimeError("Rag not available - cannot extract skills")
     
     system_prompt = """
     Extract ALL professional skills from this resume with maximum detail.
@@ -389,8 +385,6 @@ async def extract_work_history_timeline(text: str) -> List[WorkExperience]:
         List[WorkExperience]: Chronologically ordered work history
     """
     
-    if not RAG_AVAILABLE:
-        raise RuntimeError("Rag not available - cannot extract work history")
     
     system_prompt = """
     Extract work history with MAXIMUM temporal accuracy.
@@ -454,7 +448,6 @@ async def extract_work_history_timeline(text: str) -> List[WorkExperience]:
 async def extract_legal_entities(text: str) -> 'Contract':
     """Extract structured data from legal contracts"""
     from app.models.ontologies import Contract
-    if not RAG_AVAILABLE: raise RuntimeError("Rag unavailable")
     
     system_prompt = """
     Extract structured legal data from this contract.
@@ -483,7 +476,6 @@ async def extract_legal_entities(text: str) -> 'Contract':
 async def extract_financial_entities(text: str) -> 'Invoice':
     """Extract structured data from financial documents/invoices"""
     from app.models.ontologies import Invoice
-    if not RAG_AVAILABLE: raise RuntimeError("Rag unavailable")
     
     system_prompt = """
     Extract structured invoice data.
@@ -512,7 +504,6 @@ async def extract_financial_entities(text: str) -> 'Invoice':
 async def extract_education_entities(text: str) -> 'CourseMaterial':
     """Extract structured data from educational content"""
     from app.models.ontologies import CourseMaterial
-    if not RAG_AVAILABLE: raise RuntimeError("Rag unavailable")
     
     system_prompt = """
     Extract structured educational content.

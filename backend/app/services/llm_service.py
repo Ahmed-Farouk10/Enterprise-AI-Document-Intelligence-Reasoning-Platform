@@ -487,9 +487,11 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                  api_key = llm_key
                  
         if api_key or os.getenv("LLM_PROVIDER", "").lower() == "openrouter":
+             safe_key = api_key or "local"
+             logger.info(f"⚡ OpenRouter Init | Provider: {os.getenv('LLM_PROVIDER')} | Key Prefix: {str(safe_key)[:6]}... | Key Len: {len(str(safe_key))}")
              return openai.OpenAI(
                  base_url="https://openrouter.ai/api/v1",
-                 api_key=api_key or "local"  # Prevent 'dummy' since 'local' will be caught better by underlying errors if it breaks
+                 api_key=safe_key  # Prevent 'dummy' since 'local' will be caught better by underlying errors if it breaks
              )
              
         # Defaults to Generic OpenAI
