@@ -261,9 +261,94 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             self._circuit_open = False
             logger.info("✅ Circuit Breaker RESET: Service healthy")
 
-    # [REMOVED] _generate_via_gemini method for Ollama migration
+    def _generate_via_gemini_direct(self, prompt: Any, max_tokens: int = 1024, temperature: float = 0.3) -> str:
+        """Fallback for Gemini models on HF Spaces using google-generativeai"""
+        try:
+            import google.generativeai as genai
+            
+            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("LLM_API_KEY")
+            if not api_key or api_key == "local":
+                 raise ValueError("No valid Gemini API key found in environment (GEMINI_API_KEY/GOOGLE_API_KEY/LLM_API_KEY).")
+                 
+            genai.configure(api_key=api_key)
+            
+            # Extract just the model name if it has the litellm "gemini/" prefix
+            model_name = self.model_name.replace("gemini/", "") if self.model_name.startswith("gemini/") else self.model_name
+            if not model_name or model_name == "gemini":
+                model_name = "gemini-2.0-flash"
+                
+            model = genai.GenerativeModel(model_name)
+            
+            # Combine role messages safely for native gemini SDK
+            if isinstance(prompt, list):
+                text_prompt = ""
+                for msg in prompt:
+                    role = msg.get("role", "user").upper()
+                    content = msg.get("content", "")
+                    text_prompt += f"{role}: {content}\n\n"
+            else:
+                text_prompt = str(prompt)
+                
+            response = model.generate_content(
+                text_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                )
+            )
+            return response.text
+            
+        except Exception as e:
+            logger.error(f"❌ Native Gemini API failed: {e}")
+            raise e
 
-
+    def _generate_via_gemini_stream(self, prompt: Any, max_tokens: int = 1024, temperature: float = 0.3) -> Generator[str, None, None]:
+        """Streaming fallback for Gemini models via native SDK"""
+        try:
+            import google.generativeai as genai
+            
+            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("LLM_API_KEY")
+            if not api_key or api_key == "local":
+                 raise ValueError("No valid Gemini API key found.")
+                 
+            genai.configure(api_key=api_key)
+            
+            model_name = self.model_name.replace("gemini/", "") if self.model_name.startswith("gemini/") else self.model_name
+            if not model_name or model_name == "gemini":
+                model_name = "gemini-2.0-flash"
+                
+            model = genai.GenerativeModel(model_name)
+            
+            if isinstance(prompt, list):
+                text_prompt = ""
+                for msg in prompt:
+                    role = msg.get("role", "user").upper()
+                    content = msg.get("content", "")
+                    text_prompt += f"{role}: {content}\n\n"
+            else:
+                text_prompt = str(prompt)
+                
+            yield "[STREAM_START]\n"
+            
+            response = model.generate_content(
+                text_prompt,
+                stream=True,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                )
+            )
+            
+            for chunk in response:
+                if chunk.text:
+                    yield chunk.text
+                    
+            yield "\n[STREAM_END]"
+            
+        except Exception as e:
+            logger.error(f"❌ Native Gemini API Stream failed: {e}")
+            yield f"\n⚠️ [ERROR] Gemini API failed: {str(e)}"
+            yield "\n[STREAM_END]"
 
     def _generate_via_inference_api(
         self,
@@ -650,8 +735,11 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
 
         self._ensure_loaded()
         
-        # If model not loaded (HF Spaces), use Inference API
+        # If model not loaded (HF Spaces), use Inference API or Gemini SDK
         if self.model is None:
+            if "gemini" in self.model_name.lower() or os.getenv("LLM_PROVIDER", "").lower() == "gemini":
+                logger.info("⚡ Using Native Gemini SDK for generation")
+                return self._generate_via_gemini_direct(prompt, max_tokens, temperature)
             logger.info("Using HuggingFace Inference API with chat completions")
             return self._generate_via_inference_api(prompt, max_tokens, temperature, top_p)
 
@@ -709,9 +797,17 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         
         messages = self._prepare_messages(system_prompt, document_context, question)
 
-        # Fallback to Inference API if model not loaded
-        # Fallback to Inference API if model not loaded
+        # Fallback to external APIs if model not loaded
         if self.model is None:
+            if "gemini" in self.model_name.lower() or os.getenv("LLM_PROVIDER", "").lower() == "gemini":
+                logger.info("⚡ Using Native Gemini SDK for streaming")
+                yield from self._generate_via_gemini_stream(
+                    prompt=messages,
+                    max_tokens=max_new_tokens,
+                    temperature=temperature
+                )
+                return
+                
             logger.info("Using HuggingFace Inference API for streaming")
             yield from self._generate_via_inference_api_stream(
                 prompt=messages,
