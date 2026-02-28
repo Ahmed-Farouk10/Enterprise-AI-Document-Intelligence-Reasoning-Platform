@@ -46,11 +46,13 @@ RUN playwright install --with-deps chromium
 # Pre-download Models to speed up HF Spaces startup
 # This bakes the Embedding Model and LLM Tokenizer into the Docker image
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')" && \
-    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('Qwen/Qwen2.5-72B-Instruct', trust_remote_code=True)"
+    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('Qwen/Qwen2.5-7B-Instruct', trust_remote_code=True)"
 
+# Fix permissions on downloaded cache so app user can access it
+RUN chown -R appuser:appuser /app/.cache
 
 # Copy application code
-ENV DEPLOY_TIMESTAMP=20240208_2030
+ENV DEPLOY_TIMESTAMP=20240208_2041
 COPY --chown=appuser:appuser . .
 
 # Switch to non-root user

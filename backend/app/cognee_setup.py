@@ -263,6 +263,33 @@ def apply_cognee_monkey_patch():
         os.makedirs = patched_makedirs
         log("[PATCH] os.makedirs redirection active")
 
+        # --- FIX 5: Unholy Open Patch ---
+        # Cognee hardcodes some file paths (like .anon_id or Kuzu .pkl files) to site-packages natively.
+        import builtins
+        original_open = builtins.open
+        
+        def patched_open(file, *args, **kwargs):
+            file_str = str(file)
+            if "site-packages" in file_str and (".anon_id" in file_str or "cognee" in file_str):
+                # Redirect
+                if ".anon_id" in file_str:
+                    new_path = os.path.join(COGNEE_ROOT, ".anon_id")
+                else:
+                    parts = file_str.split("site-packages")
+                    sub_path = parts[-1].lstrip(os.sep)
+                    # sub_path would be 'cognee/.cognee_system/databases/...'
+                    if sub_path.startswith("cognee"):
+                        sub_path = sub_path[len("cognee"):].lstrip(os.sep)
+                    new_path = os.path.join(COGNEE_ROOT, sub_path)
+                
+                # Make sure directory exists, then open
+                os.makedirs(os.path.dirname(new_path), mode=0o777, exist_ok=True)
+                return original_open(new_path, *args, **kwargs)
+            return original_open(file, *args, **kwargs)
+            
+        builtins.open = patched_open
+        log("[PATCH] builtins.open redirection active for Cognee")
+
     except Exception as e:
         log(f"[FATAL] Patching failed: {e}", "error")
         import traceback
