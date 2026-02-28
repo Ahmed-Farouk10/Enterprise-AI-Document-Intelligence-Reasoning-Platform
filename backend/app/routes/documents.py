@@ -59,7 +59,7 @@ async def process_document_background(document_id: str, file_path: Path, mime_ty
                         )
                         
                         # 2. Extract structured entities (Resumes, Invoices, etc.)
-                        from app.services.cognee_pipelines import route_to_pipeline
+                        from app.services.rag_pipelines import route_to_pipeline
                         logger.info(f" Extracted structured entities for {document_id}")
                         
                         pipeline_result = await route_to_pipeline(

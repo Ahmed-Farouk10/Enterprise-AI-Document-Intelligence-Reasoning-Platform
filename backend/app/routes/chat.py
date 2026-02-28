@@ -53,9 +53,9 @@ class ChatMessageResponse(BaseModel):
     metadata: Optional[Dict] = None
 
 
-# --- Cognee Enhanced Schemas ---
+# --- Rag Enhanced Schemas ---
 
-class CogneeQuery(BaseModel):
+class RagQuery(BaseModel):
     question: str = Field(..., min_length=3, max_length=2000)
     analysis_mode: str = Field(default="auto", description="entities, temporal, comparative, anomalies, summary, or auto")
     include_graph_viz: bool = Field(default=False)
@@ -63,7 +63,7 @@ class CogneeQuery(BaseModel):
     document_id: Optional[str] = None
 
 
-class CogneeResponse(BaseModel):
+class RagResponse(BaseModel):
     answer: str
     confidence: float
     evidence_paths: List[List[Dict]]
@@ -215,7 +215,7 @@ async def send_message(
     depth = llm.classify_depth(message_data.content)
     scope = llm.detect_scope(message_data.content)
     
-    # 4. Retrieve document context (Cognee Graph Reasoning)
+    # 4. Retrieve document context (Rag Graph Reasoning)
     retrieval_data = await _get_retrieved_context(
         message_data.content, 
         depth=depth,
@@ -401,7 +401,7 @@ async def stream_message(
             if retrieval_method == "hybrid":
                 yield _sse_event("status", f"🔍 Hybrid Mode: Vector Store + Graph | Depth: {depth}")
                 yield _sse_event("reasoning", "🕸️ Combining vector search with knowledge graph...")
-            elif retrieval_method == "cognee":
+            elif retrieval_method == "rag":
                 yield _sse_event("status", f"🔍 Graph Mode: {intent} | Depth: {depth}")
                 yield _sse_event("reasoning", "🕸️ Traversing knowledge graph for evidence...")
             else:  # vector_store or none
@@ -645,17 +645,17 @@ def _create_error_response(session_id: str, content: str, db: Session) -> Dict:
         }
 
 
-# --- Cognee Specialized Endpoints ---
+# --- Rag Specialized Endpoints ---
 
-@router.post("/query", response_model=CogneeResponse)
+@router.post("/query", response_model=RagResponse)
 @limiter.limit("50/minute")
-async def cognee_query(
+async def rag_query(
     request: Request,
-    query: CogneeQuery,
+    query: RagQuery,
     db: Session = Depends(get_db)
 ):
     """
-    Execute Cognee knowledge graph query.
+    Execute Rag knowledge graph query.
     Primary analysis endpoint - replaces/augments standard RAG.
     """
     start_time = asyncio.get_event_loop().time()
@@ -676,8 +676,8 @@ async def cognee_query(
     mode = _map_query_to_mode(query.question, query.analysis_mode)
     
     try:
-        # Execute Cognee query
-        result: GraphQueryResult = await cognee_engine.query(
+        # Execute Rag query
+        result: GraphQueryResult = await rag_engine.query(
             question=query.question,
             document_ids=doc_ids,
             mode=mode,
@@ -694,7 +694,7 @@ async def cognee_query(
                 {"confidence": result.confidence_score, "mode": mode.value}
             )
         
-        return CogneeResponse(
+        return RagResponse(
             answer=result.answer,
             confidence=result.confidence_score,
             evidence_paths=result.evidence_paths,
@@ -704,15 +704,15 @@ async def cognee_query(
             processing_time_ms=processing_time
         )
     except Exception as e:
-        logger.error(f"Cognee query failed: {e}")
+        logger.error(f"Rag query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/documents/{document_id}/gaps")
 async def analyze_temporal_gaps(document_id: str):
-    """Specialized temporal gap analysis using Cognee graph."""
+    """Specialized temporal gap analysis using Rag graph."""
     try:
-        result = await cognee_engine.analyze_gaps(document_id)
+        result = await rag_engine.analyze_gaps(document_id)
         return {
             "document_id": document_id,
             "analysis": result.answer,
@@ -727,7 +727,7 @@ async def analyze_temporal_gaps(document_id: str):
 async def compare_documents(source_id: str, target_id: str):
     """Compare two documents using graph alignment."""
     try:
-        result = await cognee_engine.compare_to_standards(source_id, target_id)
+        result = await rag_engine.compare_to_standards(source_id, target_id)
         return {
             "source_id": source_id,
             "target_id": target_id,

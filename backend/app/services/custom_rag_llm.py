@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
-class CustomCogneeLLMEngine:
+class CustomRagLLMEngine:
     """
-    Custom LLM Engine for Cognee that uses our local LLMService (Qwen) 
+    Custom LLM Engine for Rag that uses our local LLMService (Qwen) 
     instead of defaulting to OpenAI/LiteLLM.
     
-    Implements the protocol expected by Cognee's LLMGateway.
+    Implements the protocol expected by Rag's LLMGateway.
     """
     def __init__(self):
         self.provider = "custom_local"

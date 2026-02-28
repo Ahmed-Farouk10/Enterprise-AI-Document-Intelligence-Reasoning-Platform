@@ -1,12 +1,12 @@
 """
-Professional Cognee Data Models for Document Intelligence.
+Professional Rag Data Models for Document Intelligence.
 
-This module defines domain-specific DataPoint models following Cognee best practices.
+This module defines domain-specific DataPoint models following Rag best practices.
 Each model represents entities extracted from uploaded documents (resumes, contracts, etc.)
 and their relationships in the knowledge graph.
 
-Based on official Cognee documentation:
-https://docs.cognee.ai/guides/custom-data-models
+Based on official Rag documentation:
+https://docs.rag.ai/guides/custom-data-models
 """
 
 from typing import List, Dict, Any, Optional
@@ -14,9 +14,9 @@ from pydantic import Field, BaseModel, model_validator
 from datetime import datetime
 
 try:
-    from cognee.infrastructure.engine import DataPoint
+    from rag.infrastructure.engine import DataPoint
 except ImportError:
-    # Fallback for type checking if Cognee not installed
+    # Fallback for type checking if Rag not installed
     class DataPoint(BaseModel):
         pass
 

@@ -1,5 +1,5 @@
 """
-Professional Cognee Custom Retrievers.
+Professional Rag Custom Retrievers.
 
 This module implements domain-specific retrieval logic for the Knowledge Graph.
 It allows complex queries like:
@@ -7,29 +7,29 @@ It allows complex queries like:
 - "Identify career gaps in this resume"
 - "Compare this candidate against the job description"
 
-Uses Cognee's search APIs combined with custom graph traversal logic.
+Uses Rag's search APIs combined with custom graph traversal logic.
 """
 
 import logging
 import uuid
 from typing import List, Dict, Any, Optional
-# import cognee
-# from cognee.api.v1.search import SearchType
+# import rag
+# from rag.api.v1.search import SearchType
 SearchType = type('SearchType', (), {'SUMMARIES': 'summaries', 'HYBRID': 'hybrid'})
-class cognee:
+class rag:
     @staticmethod
     async def search(*args, **kwargs): return []
 
-from app.core.cognee_config import settings as cognee_settings
+from app.core.rag_config import settings as rag_settings
 try:
-    from cognee.modules.users.models import User
+    from rag.modules.users.models import User
 except ImportError:
     class User:
         def __init__(self, id):
             self.id = id
 
 # Models
-from app.models.cognee_models import Resume, Person, Skill, CareerGap, SkillMatch, ComparisonResult
+from app.models.rag_models import Resume, Person, Skill, CareerGap, SkillMatch, ComparisonResult
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +58,11 @@ class ResumeRetriever:
             if search_type == SearchType.SUMMARIES:
                 logger.info("ℹ️ SearchType.HYBRID not found in Enum, using SUMMARIES with hybrid intent")
             
-            # Use Cognee's search (Vector + Graph)
-            search_results = await cognee.search(
+            # Use Rag's search (Vector + Graph)
+            search_results = await rag.search(
                 query_text=query,
                 search_type=search_type,
-                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                user=User(id=uuid.UUID(rag_settings.DEFAULT_USER_ID))
             )
             
             candidates = []
@@ -91,10 +91,10 @@ class ResumeRetriever:
         try:
             # 1. Search for work history related to this document/person
             # We search for "work experience" to get relevant nodes
-            results = await cognee.search(
+            results = await rag.search(
                 query_text="work experience history jobs",
                 search_type=SearchType.SUMMARIES,
-                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                user=User(id=uuid.UUID(rag_settings.DEFAULT_USER_ID))
             )
             
             # 2. Parse results into a list of work periods
@@ -141,10 +141,10 @@ class ResumeRetriever:
         
         try:
             # 1. Retrieve candidate profile (Formatted text of skills and experience)
-            results = await cognee.search(
+            results = await rag.search(
                 query_text="skills experience qualifications",
                 search_type=SearchType.SUMMARIES,
-                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                user=User(id=uuid.UUID(rag_settings.DEFAULT_USER_ID))
             )
             
             candidate_profile = "\n".join([getattr(r, 'text', str(r)) for r in results[:10]])
@@ -159,8 +159,8 @@ class ResumeRetriever:
                 )
 
             # 2. Use LLM to compare
-            from app.services.custom_cognee_llm import CustomCogneeLLMEngine
-            engine = CustomCogneeLLMEngine()
+            from app.services.custom_rag_llm import CustomRagLLMEngine
+            engine = CustomRagLLMEngine()
             
             system_prompt = f"""
             Compare this candidate profile against the job description.
@@ -202,6 +202,6 @@ class ResumeRetriever:
         """
         Retrieve localized graph for visualization.
         """
-        # Leverage existing graph export from Cognee engine
+        # Leverage existing graph export from Rag engine
         # But formatted for frontend (nodes/edges)
         pass

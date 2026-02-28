@@ -3,22 +3,22 @@ import sys
 import logging
 
 # --- 1. GLOBAL PATHS ---
-# We use /app/.cache/cognee_data as the single source of truth for our vector DB and local models
-COGNEE_ROOT = "/app/.cache/cognee_data"
-DB_PATH = os.path.join(COGNEE_ROOT, "databases")
+# We use /app/.cache/app_data as the single source of truth for our vector DB and local models
+STORAGE_ROOT = "/app/.cache/app_data"
+DB_PATH = os.path.join(STORAGE_ROOT, "databases")
 
 # Configure logging for setup
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("cognee_setup")
+logger = logging.getLogger("storage_setup")
 
 def log(msg, level="info"):
     """Dual logging to logger and stderr for guaranteed visibility"""
     getattr(logger, level)(msg)
     print(f"[{level.upper()}] {msg}", file=sys.stderr)
 
-def verify_cognee_setup():
+def verify_storage_setup():
     """Ensures directories exist and sets basic environment variables for LLMs."""
-    log(f"[SETUP] Starting simplified verification for root: {COGNEE_ROOT}")
+    log(f"[SETUP] Starting simplified verification for root: {STORAGE_ROOT}")
     
     # 1. Ensure basic working directories exist (for Vector DB and SQLite)
     os.makedirs(DB_PATH, mode=0o777, exist_ok=True)
@@ -40,12 +40,5 @@ def verify_cognee_setup():
     
     log(f"[SETUP] Basic LLM Configuration Complete.")
 
-def apply_cognee_monkey_patch():
-    """
-    Skipping monkey patch. Cognee Knowledge Graph is no longer used in Phase 2 architecture.
-    """
-    log("[PATCH] Phase 2: Monkey patches disabled. Running pure RAG architecture.")
-    pass
-
 # Execute verification on import
-verify_cognee_setup()
+verify_storage_setup()

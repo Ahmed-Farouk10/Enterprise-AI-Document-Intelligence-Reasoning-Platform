@@ -4,19 +4,18 @@ import pathlib
 import sys
 import logging
 
-# ===== CRITICAL: Configure Cognee Path BEFORE Any Other Imports =====
-# This ensures environment variables and monkey patches are applied 
-# BEFORE Cognee or any other module imports it.
+# ===== CRITICAL: Configure Storage Path BEFORE Any Other Imports =====
+# This ensures environment variables are applied early.
 try:
-    from app.cognee_setup import COGNEE_ROOT, verify_cognee_setup
+    from app.storage_setup import STORAGE_ROOT, verify_storage_setup
 except ImportError:
     # Fallback if running from root without package context
     sys.path.append(os.path.join(os.getcwd(), 'app'))
-    from app.cognee_setup import COGNEE_ROOT, verify_cognee_setup
+    from app.storage_setup import STORAGE_ROOT, verify_storage_setup
 
 # Create directories explicitly (Redundant but safe)
-pathlib.Path(f"{COGNEE_ROOT}/data_storage").mkdir(parents=True, exist_ok=True)
-pathlib.Path(f"{COGNEE_ROOT}/databases").mkdir(parents=True, exist_ok=True)
+pathlib.Path(f"{STORAGE_ROOT}/data_storage").mkdir(parents=True, exist_ok=True)
+pathlib.Path(f"{STORAGE_ROOT}/databases").mkdir(parents=True, exist_ok=True)
 # ====================================================================
 
 from fastapi import FastAPI, Request
@@ -58,25 +57,18 @@ async def lifespan(app: FastAPI):
     logger.info("application_startup", status="creating_database_tables")
     Base.metadata.create_all(bind=engine)
     
-    # [ADDED] Force Cognee Table Creation (Synchronous Wrapper)
+    # [ADDED] Force Rag Table Creation (Synchronous Wrapper)
     # This is critical for HF Spaces where async init might be flaky
-    try:
-        from cognee.infrastructure.databases.relational import create_db_and_tables
-        logger.info("⚙️ STARTUP: Forcing Cognee table verification...")
-        await create_db_and_tables()
-        logger.info("✅ STARTUP: Cognee tables initialized.")
-    except Exception as e:
-        logger.error(f"⚠️ STARTUP WARNING: Cognee init failed: {e}")
-
+    logger.info("✅ STARTUP: Application Initialization Phase Started.")
     logger.info("application_startup", status="database_initialized")
 
     # Warmup LLM Service
     from app.services.llm_service import llm_service
     asyncio.create_task(asyncio.to_thread(llm_service.warmup))
 
-    # Cognee Engine fully removed. Database handled dynamically by Vector Store.
+    # Rag Engine fully removed. Database handled dynamically by Vector Store.
     # Start Memify Background Service (Self-Improvement)
-    from app.services.cognee_background import memify_service
+    from app.services.rag_background import memify_service
     await memify_service.start()
     logger.info("application_startup", status="memify_service_started")
     

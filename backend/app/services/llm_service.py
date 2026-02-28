@@ -174,7 +174,7 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                 logger.warning("💡 Will use HuggingFace Inference API for completions")
                 
                 # MEMORY OPTIMIZATION: Skip tokenizer if low memory mode is enabled
-                if os.getenv("COGNEE_LOW_MEMORY_MODE") == "true":
+                if os.getenv("RAG_LOW_MEMORY_MODE") == "true":
                      logger.info("⚡ Low Memory Mode: Skipping local tokenizer load (Will rely on API)")
                      return
 

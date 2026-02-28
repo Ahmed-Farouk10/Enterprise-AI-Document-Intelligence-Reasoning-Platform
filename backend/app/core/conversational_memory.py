@@ -75,7 +75,7 @@ class ConversationalMemory:
                 query_embedding = await self.embedding_engine.embed_text(query)
             
             # 2. Fetch recent short-term memories
-            # In a real system, these would be in a vector DB (LanceDB/Qdrant) managed by Cognee.
+            # In a real system, these would be in a vector DB (LanceDB/Qdrant) managed by Rag.
             # Here for the "memory" module, we re-rank recent dictionary items.
             recent_memories = await self.get_short_term(user_id, limit=50)
             

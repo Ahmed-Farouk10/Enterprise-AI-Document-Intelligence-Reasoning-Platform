@@ -108,13 +108,13 @@ def process_document_task(self, doc_id: str, file_path: str, mime_type: str, fil
             document.status = "failed"
             logger.warning("no_text_extracted", doc_id=doc_id)
         
-        # Add to Knowledge Graph (Cognee Upgrade)
+        # Add to Knowledge Graph (Rag Upgrade)
         if text and len(text.strip()) > 50:
             try:
                 import asyncio
                 from app.services.knowledge_graph import kg_service
                 
-                # Determine domain for Cognee configuration
+                # Determine domain for Rag configuration
                 doc_type = "auto_detect"
                 if "resume" in filename.lower() or "cv" in filename.lower():
                     doc_type = "resume"

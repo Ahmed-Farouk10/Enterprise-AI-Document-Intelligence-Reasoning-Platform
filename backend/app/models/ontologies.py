@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import date
 try:
-    from cognee.modules.graph.models import Entity
+    from rag.modules.graph.models import Entity
 except ImportError:
     class Entity(BaseModel):
         pass

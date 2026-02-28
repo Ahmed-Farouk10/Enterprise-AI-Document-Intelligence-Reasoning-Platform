@@ -14,19 +14,19 @@ class PatternEngine:
     
     async def extract_cross_document_patterns(self):
         """
-        Identify recurring patterns across all documents using Cognee.
+        Identify recurring patterns across all documents using Rag.
         """
         try:
-            # import cognee
-            from app.core.cognee_config import settings as cognee_settings
-            from cognee.modules.users.models import User
+            # import rag
+            from app.core.rag_config import settings as rag_settings
+            from rag.modules.users.models import User
             import uuid
             
             # Retrieve summaries from the graph to find high-level patterns
-            results = await cognee.search(
+            results = await rag.search(
                 query_text="recurring themes and patterns",
                 query_type="SUMMARIES",
-                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                user=User(id=uuid.UUID(rag_settings.DEFAULT_USER_ID))
             )
             return results
         except Exception as e:
@@ -38,15 +38,15 @@ class PatternEngine:
         Memory consolidation: behaviors.
         """
         try:
-            # import cognee
-            from app.core.cognee_config import settings as cognee_settings
-            from cognee.modules.users.models import User
+            # import rag
+            from app.core.rag_config import settings as rag_settings
+            from rag.modules.users.models import User
             import uuid
             
-            # Use Cognee's native memify to consolidate knowledge
-            await cognee.memify(
+            # Use Rag's native memify to consolidate knowledge
+            await rag.memify(
                 datasets=["cross_doc_knowledge"], # Virtual dataset
-                user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                user=User(id=uuid.UUID(rag_settings.DEFAULT_USER_ID))
             )
         except Exception:
             pass
@@ -57,23 +57,23 @@ class PatternEngine:
         """
         if feedback.get("rating") == "negative":
             try:
-                # import cognee
-                from app.core.cognee_config import settings as cognee_settings
-                from cognee.modules.users.models import User
+                # import rag
+                from app.core.rag_config import settings as rag_settings
+                from rag.modules.users.models import User
                 import uuid
                 
                 # Treat feedback as a new knowledge input
                 correction_text = f"Correction for query '{query}': {feedback.get('comment', 'No comment')}"
                 dataset_name = "feedback_memory"
                 
-                await cognee.add(
+                await rag.add(
                     data=correction_text,
                     dataset_name=dataset_name,
-                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                    user=User(id=uuid.UUID(rag_settings.DEFAULT_USER_ID))
                 )
-                await cognee.cognify(
+                await rag.cognify(
                     datasets=[dataset_name],
-                    user=User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+                    user=User(id=uuid.UUID(rag_settings.DEFAULT_USER_ID))
                 )
             except Exception:
                 pass

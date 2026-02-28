@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 # --- 1. PERSISTENT CONFIGURATION ---
 # We force the database to live in the writable cache folder provided by HF Spaces
-COGNEE_ROOT = "/app/.cache/cognee_data"
-DB_DIR = os.path.join(COGNEE_ROOT, "databases")
+RAG_ROOT = "/app/.cache/rag_data"
+DB_DIR = os.path.join(RAG_ROOT, "databases")
 
 # Ensure the directory exists immediately so we don't get 'unable to open database file'
 os.makedirs(DB_DIR, exist_ok=True)

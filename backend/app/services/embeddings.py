@@ -7,8 +7,8 @@ logger = logging.getLogger(__name__)
 
 class SentenceTransformerEmbeddingEngine:
     """
-    Custom wrapper for SentenceTransformers to be used as Cognee embedding engine.
-    Implements the protocol expected by Cognee (embed_text).
+    Custom wrapper for SentenceTransformers to be used as Rag embedding engine.
+    Implements the protocol expected by Rag (embed_text).
     """
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         try:
@@ -25,28 +25,19 @@ class SentenceTransformerEmbeddingEngine:
         """
         Embed text(s) asynchronously.
         Supports single string or List[str].
-        Protocol required by Cognee 0.5.2+.
+        Protocol required by Rag 0.5.2+.
         """
-        import asyncio
         try:
             if not text:
                 return [0.0] * self.dimension
                 
             if isinstance(text, list):
                 # Batch processing
-                embeddings = await asyncio.to_thread(
-                    self.model.encode, 
-                    text, 
-                    convert_to_numpy=True
-                )
+                embeddings = self.model.encode(text, convert_to_numpy=True)
                 return [v.tolist() for v in embeddings]
             
             # Single processing
-            embedding = await asyncio.to_thread(
-                self.model.encode, 
-                text, 
-                convert_to_numpy=True
-            )
+            embedding = self.model.encode(text, convert_to_numpy=True)
             return embedding.tolist()
         except Exception as e:
             logger.error(f"Embedding failed: {e}")
@@ -54,7 +45,7 @@ class SentenceTransformerEmbeddingEngine:
                 return [[0.0] * self.dimension for _ in text]
             return [0.0] * self.dimension
 
-    # Shim for older Cognee versions or sync contexts if needed
+    # Shim for older Rag versions or sync contexts if needed
     def embed_text_sync(self, text: Any) -> Any:
         if isinstance(text, list):
             embeddings = self.model.encode(text, convert_to_numpy=True)

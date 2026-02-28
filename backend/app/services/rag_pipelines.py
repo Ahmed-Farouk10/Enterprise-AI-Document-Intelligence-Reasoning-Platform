@@ -5,16 +5,16 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
 try:
-    # import cognee
-    from cognee.infrastructure.llm.LLMGateway import LLMGateway
-    from cognee.modules.pipelines import Task, run_pipeline
-    from cognee.tasks.storage import add_data_points
-    COGNEE_AVAILABLE = True
+    # import rag
+    from rag.infrastructure.llm.LLMGateway import LLMGateway
+    from rag.modules.pipelines import Task, run_pipeline
+    from rag.tasks.storage import add_data_points
+    RAG_AVAILABLE = True
 except ImportError:
-    COGNEE_AVAILABLE = False
-    logging.warning("Cognee not available - professional pipelines disabled")
+    RAG_AVAILABLE = False
+    logging.warning("Rag not available - professional pipelines disabled")
 
-from app.models.cognee_models import (
+from app.models.rag_models import (
     Resume,
     Person,
     Skill,
@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 
 # Import required for user UUID generation in fallbacks
 import uuid
-from app.core.cognee_config import settings as cognee_settings
+from app.core.rag_config import settings as rag_settings
 try:
-    from cognee.modules.users.models import User
+    from rag.modules.users.models import User
 except ImportError:
     class User:
         def __init__(self, id):
@@ -63,7 +63,7 @@ class ECLProcessor:
     
     def __init__(self, config: Optional[PipelineConfig] = None):
         self.config = config or PipelineConfig()
-        # The data root is now enforced globally via the Nuclear Patch in cognee_setup.py
+        # The data root is now enforced globally via the Nuclear Patch in rag_setup.py
         
     async def process(
         self, 
@@ -86,12 +86,12 @@ class ECLProcessor:
         Returns:
             Dict containing processing status and extracted data
         """
-        if not COGNEE_AVAILABLE:
-            raise RuntimeError("Cognee not available")
+        if not RAG_AVAILABLE:
+            raise RuntimeError("Rag not available")
 
         # Create localized dataset name
         dataset_name = f"{dataset_name_prefix}_{doc_id}"
-        user_uuid = uuid.UUID(cognee_settings.DEFAULT_USER_ID)
+        user_uuid = uuid.UUID(rag_settings.DEFAULT_USER_ID)
         user = User(id=user_uuid)
         
         logger.info(f"🚀 Starting ECL Pipeline for {dataset_name} (Type: {dataset_name_prefix})")
@@ -100,8 +100,8 @@ class ECLProcessor:
             # STEP 1: LOAD (Raw Text) - Indexed for vector search
             if self.config.include_original_text:
                 logger.info(f"💾 [LOAD] Indexing raw text for hybrid search...")
-                # In a real implementation: chunk content first? Cognee handles this if we pass text.
-                await cognee.add(
+                # In a real implementation: chunk content first? Rag handles this if we pass text.
+                await rag.add(
                     data=text_content,
                     dataset_name=dataset_name,
                     user=user
@@ -123,7 +123,7 @@ class ECLProcessor:
                     logger.info(f"💾 [LOAD] storing {type(structured_data).__name__} entities...")
                     # Normalize to list
                     data_payload = structured_data if isinstance(structured_data, list) else [structured_data]
-                    await cognee.add(
+                    await rag.add(
                         data=data_payload,
                         dataset_name=dataset_name,
                         user=user
@@ -137,7 +137,7 @@ class ECLProcessor:
             try:
                 # Use extended timeout for specific environments
                 await asyncio.wait_for(
-                    cognee.cognify(datasets=[dataset_name], user=user), 
+                    rag.cognify(datasets=[dataset_name], user=user), 
                     timeout=self.config.cognify_timeout
                 )
                 logger.info(f" ECL Pipeline success: Values persisted to Graph & Vector Store")
@@ -160,7 +160,7 @@ class ECLProcessor:
             # STEP 5: SELF-IMPROVEMENT (Memify Registration)
             if graph_status == "completed":
                 try:
-                    from app.services.cognee_background import memify_service
+                    from app.services.rag_background import memify_service
                     memify_service.register_dataset(dataset_name)
                     logger.info(f"Registered {dataset_name} for Memify maintenance")
                 except ImportError:
@@ -202,8 +202,8 @@ async def extract_resume_entities(text: str) -> Resume:
         >>> print(len(resume.work_history))  # 3
     """
     
-    if not COGNEE_AVAILABLE:
-        raise RuntimeError("Cognee not available - cannot extract entities")
+    if not RAG_AVAILABLE:
+        raise RuntimeError("Rag not available - cannot extract entities")
     
     system_prompt = """
     Extract comprehensive structured resume information from the provided text.
@@ -264,8 +264,8 @@ async def extract_resume_entities(text: str) -> Resume:
     
     try:
         # Use Custom Engine with Strict Timeout (30s)
-        from app.services.custom_cognee_llm import CustomCogneeLLMEngine
-        engine = CustomCogneeLLMEngine()
+        from app.services.custom_rag_llm import CustomRagLLMEngine
+        engine = CustomRagLLMEngine()
         
         try:
             result = await asyncio.wait_for(
@@ -279,7 +279,7 @@ async def extract_resume_entities(text: str) -> Resume:
         except asyncio.TimeoutError:
             logger.warning("⏰ Resume extraction timed out (30s). Falling back to basic extraction.")
             # Basic fallback: Create minimal valid object
-            from app.models.cognee_models import Person
+            from app.models.rag_models import Person
             return Resume(
                 person=Person(name="Unknown Candidate (Timeout)"),
                 work_history=[],
@@ -318,8 +318,8 @@ async def extract_skills_detailed(text: str) -> List[Skill]:
         List[Skill]: Detailed skills with levels and experience
     """
     
-    if not COGNEE_AVAILABLE:
-        raise RuntimeError("Cognee not available - cannot extract skills")
+    if not RAG_AVAILABLE:
+        raise RuntimeError("Rag not available - cannot extract skills")
     
     system_prompt = """
     Extract ALL professional skills from this resume with maximum detail.
@@ -351,8 +351,8 @@ async def extract_skills_detailed(text: str) -> List[Skill]:
     try:
         logger.info("🔍 Extracting detailed skills with Custom Engine...")
         
-        from app.services.custom_cognee_llm import CustomCogneeLLMEngine
-        engine = CustomCogneeLLMEngine()
+        from app.services.custom_rag_llm import CustomRagLLMEngine
+        engine = CustomRagLLMEngine()
         
         try:
             result = await asyncio.wait_for(
@@ -389,8 +389,8 @@ async def extract_work_history_timeline(text: str) -> List[WorkExperience]:
         List[WorkExperience]: Chronologically ordered work history
     """
     
-    if not COGNEE_AVAILABLE:
-        raise RuntimeError("Cognee not available - cannot extract work history")
+    if not RAG_AVAILABLE:
+        raise RuntimeError("Rag not available - cannot extract work history")
     
     system_prompt = """
     Extract work history with MAXIMUM temporal accuracy.
@@ -423,8 +423,8 @@ async def extract_work_history_timeline(text: str) -> List[WorkExperience]:
     try:
         logger.info("📅 Extracting work history timeline with Custom Engine...")
         
-        from app.services.custom_cognee_llm import CustomCogneeLLMEngine
-        engine = CustomCogneeLLMEngine()
+        from app.services.custom_rag_llm import CustomRagLLMEngine
+        engine = CustomRagLLMEngine()
         
         try:
             result = await asyncio.wait_for(
@@ -454,7 +454,7 @@ async def extract_work_history_timeline(text: str) -> List[WorkExperience]:
 async def extract_legal_entities(text: str) -> 'Contract':
     """Extract structured data from legal contracts"""
     from app.models.ontologies import Contract
-    if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
+    if not RAG_AVAILABLE: raise RuntimeError("Rag unavailable")
     
     system_prompt = """
     Extract structured legal data from this contract.
@@ -469,8 +469,8 @@ async def extract_legal_entities(text: str) -> 'Contract':
     """
     
     try:
-        from app.services.custom_cognee_llm import CustomCogneeLLMEngine
-        engine = CustomCogneeLLMEngine()
+        from app.services.custom_rag_llm import CustomRagLLMEngine
+        engine = CustomRagLLMEngine()
         result = await asyncio.wait_for(
             engine.acreate_structured_output(text, Contract, system_prompt),
             timeout=60.0
@@ -483,7 +483,7 @@ async def extract_legal_entities(text: str) -> 'Contract':
 async def extract_financial_entities(text: str) -> 'Invoice':
     """Extract structured data from financial documents/invoices"""
     from app.models.ontologies import Invoice
-    if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
+    if not RAG_AVAILABLE: raise RuntimeError("Rag unavailable")
     
     system_prompt = """
     Extract structured invoice data.
@@ -498,8 +498,8 @@ async def extract_financial_entities(text: str) -> 'Invoice':
     """
     
     try:
-        from app.services.custom_cognee_llm import CustomCogneeLLMEngine
-        engine = CustomCogneeLLMEngine()
+        from app.services.custom_rag_llm import CustomRagLLMEngine
+        engine = CustomRagLLMEngine()
         result = await asyncio.wait_for(
             engine.acreate_structured_output(text, Invoice, system_prompt),
             timeout=45.0
@@ -512,7 +512,7 @@ async def extract_financial_entities(text: str) -> 'Invoice':
 async def extract_education_entities(text: str) -> 'CourseMaterial':
     """Extract structured data from educational content"""
     from app.models.ontologies import CourseMaterial
-    if not COGNEE_AVAILABLE: raise RuntimeError("Cognee unavailable")
+    if not RAG_AVAILABLE: raise RuntimeError("Rag unavailable")
     
     system_prompt = """
     Extract structured educational content.
@@ -526,8 +526,8 @@ async def extract_education_entities(text: str) -> 'CourseMaterial':
     """
     
     try:
-        from app.services.custom_cognee_llm import CustomCogneeLLMEngine
-        engine = CustomCogneeLLMEngine()
+        from app.services.custom_rag_llm import CustomRagLLMEngine
+        engine = CustomRagLLMEngine()
         result = await asyncio.wait_for(
             engine.acreate_structured_output(text, CourseMaterial, system_prompt),
             timeout=90.0

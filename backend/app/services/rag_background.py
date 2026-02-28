@@ -2,10 +2,10 @@ import asyncio
 import logging
 import uuid
 from typing import List, Set
-from app.core.cognee_config import settings as cognee_settings
+from app.core.rag_config import settings as rag_settings
 
 try:
-    from cognee.modules.users.models import User
+    from rag.modules.users.models import User
 except ImportError:
     class User:
         def __init__(self, id):
@@ -70,10 +70,10 @@ class MemifyService:
         """Execute graph condensation and cleanup"""
         logger.info("🧠 Memify: Starting graph maintenance cycle...")
         
-        user = User(id=uuid.UUID(cognee_settings.DEFAULT_USER_ID))
+        user = User(id=uuid.UUID(rag_settings.DEFAULT_USER_ID))
         
-        # 1. Prune/Condense (If supported by installed Cognee version, otherwise simulated)
-        # Note: In Cognee 0.5.x, cognify *is* the condensation step. 
+        # 1. Prune/Condense (If supported by installed Rag version, otherwise simulated)
+        # Note: In Rag 0.5.x, cognify *is* the condensation step. 
         # Rerunning it might consolidate new nodes.
         
         for dataset in list(self.active_datasets):
@@ -81,7 +81,7 @@ class MemifyService:
                 logger.info(f"🧠 Memify: Optimizing dataset '{dataset}'")
                 # We perform a lightweight cognify or specialized task here
                 # For now, we re-run cognify to ensure graph integrity
-                await cognee.cognify(datasets=[dataset], user=user)
+                await rag.cognify(datasets=[dataset], user=user)
                 
             except Exception as e:
                 logger.warning(f"⚠️ Memify optimization failed for {dataset}: {e}")
