@@ -347,6 +347,18 @@ class CogneeEngine:
                 cognee_settings.DEFAULT_USER_ID = str(target_user_id)
                 logger.info(f"✅ Cognee initialized with User ID: {target_user_id}")
                 
+                # --- FIX 6: Proactive Kuzu Directory Creation ---
+                # Kuzu's C++ extension sometimes bypasses our Python `builtins.open` monkeypatch.
+                # We need to guarantee the folder exists *before* any pipelines run.
+                try:
+                    cognee_root = os.environ.get("COGNEE_ROOT", "/app/.cache/cognee_data")
+                    user_db_path = os.path.join(cognee_root, ".cognee_system", "databases", str(target_user_id))
+                    os.makedirs(user_db_path, mode=0o777, exist_ok=True)
+                    os.chmod(user_db_path, 0o777)
+                    logger.info(f"📁 Proactively created user DB directory at: {user_db_path}")
+                except Exception as dir_err:
+                    logger.warning(f"⚠️ Failed to proactively create user DB directory: {dir_err}")
+                
                 logger.info("✅ Cognee engine initialized successfully")
                 
             except ImportError:
