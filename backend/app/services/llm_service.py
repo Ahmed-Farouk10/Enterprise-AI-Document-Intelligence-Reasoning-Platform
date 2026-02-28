@@ -267,7 +267,8 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         prompt: Any,
         max_tokens: int = 1024,
         temperature: float = 0.3,
-        top_p: float = 0.9
+        top_p: float = 0.9,
+        raise_errors: bool = False
     ) -> str:
         """
         Generate using HuggingFace Inference API with Circuit Breaker.
@@ -301,6 +302,9 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             self._record_failure()
             error_msg = str(e)
             logger.error(f"HF Inference API failed: {error_msg}")
+            
+            if raise_errors:
+                raise e
             
             if "403 Forbidden" in error_msg and "Inference Providers" in error_msg:
                 advice = (

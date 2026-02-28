@@ -103,7 +103,8 @@ OUTPUT ONLY THE JSON OBJECT. NO MARKDOWN. NO EXPLANATION.
         response_text = llm_service._generate_via_inference_api(
             prompt=message,
             max_tokens=4096,
-            temperature=0.1
+            temperature=0.1,
+            raise_errors=True
         )
         
         # 3. Parse JSON
