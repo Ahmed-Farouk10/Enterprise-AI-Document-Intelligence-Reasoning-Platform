@@ -50,9 +50,13 @@ class VectorStoreService:
                 if last_space != -1 and last_space > start + chunk_size / 2:
                     end = last_space
             chunks.append(text[start:end].strip())
-            start = end - overlap
-            if start < 0:
-                 start = end
+            
+            # Prevent infinite loop if text has no spaces and end == start
+            next_start = end - overlap
+            if next_start <= start:
+                next_start = end
+            start = next_start
+            
         return chunks
 
     async def ingest_document(self, document_id: str, text: str, metadata: Dict[str, Any] = None) -> int:
