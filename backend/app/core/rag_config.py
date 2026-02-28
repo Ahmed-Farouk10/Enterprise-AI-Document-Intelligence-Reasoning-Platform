@@ -69,6 +69,7 @@ class RagSettings(BaseSettings):
     LLM_PROVIDER: str = os.getenv("RAG_LLM_PROVIDER", "openrouter")
     LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", "google/gemini-2.0-flash-exp:free")
     LLM_API_KEY: Optional[str] = os.getenv("LLM_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+    GROQ_API_KEY: Optional[str] = os.getenv("GROQ_API_KEY")
     
     # Standard Embedding Config
     EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "fastembed")
@@ -100,8 +101,9 @@ os.environ["EMBEDDING_PROVIDER"] = settings.EMBEDDING_PROVIDER
 os.environ["EMBEDDING_MODEL"] = settings.EMBEDDING_MODEL
 os.environ["RAG_EMBEDDING_PROVIDER"] = settings.EMBEDDING_PROVIDER # Alias for safety
 
-# Update LLM_API_KEY if explicitly provided in settings
+# Update API keys if explicitly provided in settings
 if settings.LLM_API_KEY and settings.LLM_API_KEY != "local":
     os.environ["LLM_API_KEY"] = settings.LLM_API_KEY
-
-
+    
+if settings.GROQ_API_KEY:
+    os.environ["GROQ_API_KEY"] = settings.GROQ_API_KEY
