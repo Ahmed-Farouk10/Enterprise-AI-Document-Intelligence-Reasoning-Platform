@@ -245,7 +245,17 @@ async def send_message(
     # 7. Build system prompt (Single Source of Truth)
     system_prompt = llm.build_system_prompt(config)
     
-    # 8. Route by intent
+    # 8. Handle External Search Intent
+    if intent == LLMService.INTENT_SEARCH:
+        from app.services.search import search_service
+        search_results = search_service.search(message_data.content)
+        if search_results:
+            external_context = ""
+            for i, res in enumerate(search_results[:3]):
+                external_context += f"Source {i+1}: {res.get('title', 'Unknown')}\nSnippet: {res.get('snippet', '')}\n\n"
+            scoped_context += f"\n\n[EXTERNAL RESULTS from Web Search]:\n{external_context}"
+
+    # 9. Route by intent
     try:
         if intent == LLMService.INTENT_SCORING:
             # Deterministic scoring - no streaming
@@ -417,6 +427,20 @@ async def stream_message(
             # Show memory usage if relevant
             if relevant_memories:
                  yield _sse_event("reasoning", f"🧠 Recalled {len(relevant_memories)} relevant facts from memory.")
+
+            # Phase 2: Handle External Search Intent
+            if intent == LLMService.INTENT_SEARCH:
+                yield _sse_event("status", "🌐 Triggering Web Search for additional context...")
+                from app.services.search import search_service
+                search_results = search_service.search(message_data.content)
+                if search_results:
+                    external_context = ""
+                    for i, res in enumerate(search_results[:3]):
+                        external_context += f"Source {i+1}: {res.get('title', 'Unknown')}\nSnippet: {res.get('snippet', '')}\n\n"
+                    scoped_context += f"\n\n[EXTERNAL RESULTS from Web Search]:\n{external_context}"
+                    yield _sse_event("reasoning", "🌍 Injected live web results into context.")
+                else:
+                    yield _sse_event("warning", "🌐 Web search yielded no results or timed out.")
 
             # Stream generation
             async for token in _async_stream_wrapper(
