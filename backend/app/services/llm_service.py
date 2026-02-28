@@ -834,8 +834,9 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         if self.model is None:
             provider = os.getenv("LLM_PROVIDER", "").lower()
             key = os.getenv("LLM_API_KEY", "")
+            openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
             
-            if provider in ["openrouter", "openai"] or key.startswith("sk-or-"):
+            if provider in ["openrouter", "openai"] or key.startswith("sk-or-") or openrouter_key:
                 logger.info(f"⚡ Using OpenAI-compatible API for {self.model_name}")
                 return self._generate_via_openai_compatible(prompt, max_tokens, temperature)
                 
@@ -904,8 +905,9 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         if self.model is None:
             provider = os.getenv("LLM_PROVIDER", "").lower()
             key = os.getenv("LLM_API_KEY", "")
+            openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
             
-            if provider in ["openrouter", "openai"] or key.startswith("sk-or-"):
+            if provider in ["openrouter", "openai"] or key.startswith("sk-or-") or openrouter_key:
                 logger.info(f"⚡ Using OpenAI-compatible API for streaming: {self.model_name}")
                 yield from self._generate_via_openai_compatible_stream(
                     prompt=messages,
