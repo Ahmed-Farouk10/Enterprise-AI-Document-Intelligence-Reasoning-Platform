@@ -57,18 +57,17 @@ def verify_cognee_setup():
     # If the user has old Gemini config in their HF Space secrets or .env, we MUST override it.
     
     current_provider = os.getenv("LLM_PROVIDER", "").lower()
-    if not current_provider or "gemini" in current_provider:
-        print(f"⚠️ Detected invalid/legacy provider '{current_provider}'. Forcing 'huggingface'.")
+    if not current_provider:
         os.environ["LLM_PROVIDER"] = "huggingface"
     
     current_cognee_provider = os.getenv("COGNEE_LLM_PROVIDER", "").lower()
-    if not current_cognee_provider or "gemini" in current_cognee_provider:
+    if not current_cognee_provider:
         os.environ["COGNEE_LLM_PROVIDER"] = "huggingface"
         
-    if not os.getenv("LLM_MODEL") or "gemini" in os.getenv("LLM_MODEL", "").lower():
+    if not os.getenv("LLM_MODEL"):
         os.environ["LLM_MODEL"] = "Qwen/Qwen2.5-7B-Instruct"
         
-    if not os.getenv("COGNEE_LLM_MODEL") or "gemini" in os.getenv("COGNEE_LLM_MODEL", "").lower():
+    if not os.getenv("COGNEE_LLM_MODEL"):
         os.environ["COGNEE_LLM_MODEL"] = "Qwen/Qwen2.5-7B-Instruct"
 
     # Ensure Key is present (HF_TOKEN preferred)
@@ -263,13 +262,26 @@ def apply_cognee_monkey_patch():
         os.makedirs = patched_makedirs
         log("[PATCH] os.makedirs redirection active")
 
-        # --- FIX 5: Unholy Open Patch ---
+        # --- FIX 5: Unholy Open Patch (Enhanced with auto-mkdir) ---
         # Cognee hardcodes some file paths (like .anon_id or Kuzu .pkl files) to site-packages natively.
+        # It also expects parent directories to exist before it writes them.
         import builtins
         original_open = builtins.open
         
         def patched_open(file, *args, **kwargs):
             file_str = str(file)
+            
+            # 1. First, check if they are trying to write/append ANY file inside our cognee_data cache.
+            # If so, aggressively create the parent directory because Cognee forgets to do this for User IDs!
+            mode = kwargs.get('mode', args[0] if args else 'r')
+            if any(m in mode for m in ['w', 'a', 'x', '+']):
+                if COGNEE_ROOT in file_str or ".cache" in file_str:
+                    try:
+                        os.makedirs(os.path.dirname(file_str), mode=0o777, exist_ok=True)
+                    except Exception:
+                        pass
+                        
+            # 2. Redirect site-packages writes to COGNEE_ROOT
             if "site-packages" in file_str and (".anon_id" in file_str or "cognee" in file_str):
                 # Redirect
                 if ".anon_id" in file_str:
@@ -285,10 +297,11 @@ def apply_cognee_monkey_patch():
                 # Make sure directory exists, then open
                 os.makedirs(os.path.dirname(new_path), mode=0o777, exist_ok=True)
                 return original_open(new_path, *args, **kwargs)
+                
             return original_open(file, *args, **kwargs)
             
         builtins.open = patched_open
-        log("[PATCH] builtins.open redirection active for Cognee")
+        log("[PATCH] builtins.open redirection + auto-mkdir active for Cognee")
 
     except Exception as e:
         log(f"[FATAL] Patching failed: {e}", "error")

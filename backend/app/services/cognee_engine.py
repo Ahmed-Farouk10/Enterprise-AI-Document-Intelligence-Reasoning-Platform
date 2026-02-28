@@ -53,6 +53,12 @@ try:
         Intercepts Cognee's client creation. 
         If on HF Spaces, returns our Custom Engine that handles 'huggingface' provider logic.
         """
+        # If the user explicitly provided a Gemini API configuration, let Cognee handle it natively.
+        provider = os.getenv("LLM_PROVIDER", "").lower()
+        if "gemini" in provider:
+             print("🛡️ [PATCH] gemini provider detected -> Bypassing CustomCogneeLLMEngine")
+             return _original_get_llm_client()
+
         # Check if we should intercept: 
         # 1. On HF Spaces (HF_HOME is set)
         # 2. Or explicitly opted in via CUSTOM_LLM env var
