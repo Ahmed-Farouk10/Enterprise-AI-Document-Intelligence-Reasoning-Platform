@@ -477,24 +477,35 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
     def _get_openai_client(self):
         """Helper to get an OpenAI compatible client based on environment"""
         import openai
+        provider = os.getenv("LLM_PROVIDER", "").lower()
         
-        # Check OpenRouter
+        # 1. Check Groq
+        groq_key = os.getenv("GROQ_API_KEY")
+        if groq_key or provider == "groq":
+             safe_key = groq_key or "local"
+             logger.info(f"⚡ Groq Init | Provider: {provider} | Key Prefix: {str(safe_key)[:6]}...")
+             return openai.OpenAI(
+                 base_url="https://api.groq.com/openai/v1",
+                 api_key=safe_key
+             )
+        
+        # 2. Check OpenRouter
         api_key = os.getenv("OPENROUTER_API_KEY") 
         if not api_key:
              llm_key = os.getenv("LLM_API_KEY", "")
              # If provider is explicitly openrouter or key looks like one, inherit the key
-             if llm_key.startswith("sk-or-") or os.getenv("LLM_PROVIDER", "").lower() == "openrouter":
+             if llm_key.startswith("sk-or-") or provider == "openrouter":
                  api_key = llm_key
                  
-        if api_key or os.getenv("LLM_PROVIDER", "").lower() == "openrouter":
+        if api_key or provider == "openrouter":
              safe_key = api_key or "local"
-             logger.info(f"⚡ OpenRouter Init | Provider: {os.getenv('LLM_PROVIDER')} | Key Prefix: {str(safe_key)[:6]}... | Key Len: {len(str(safe_key))}")
+             logger.info(f"⚡ OpenRouter Init | Provider: {provider} | Key Prefix: {str(safe_key)[:6]}... | Key Len: {len(str(safe_key))}")
              return openai.OpenAI(
                  base_url="https://openrouter.ai/api/v1",
                  api_key=safe_key  # Prevent 'dummy' since 'local' will be caught better by underlying errors if it breaks
              )
              
-        # Defaults to Generic OpenAI
+        # 3. Defaults to Generic OpenAI
         api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY", "")
         base_url = os.getenv("OPENAI_BASE_URL")
         
@@ -513,7 +524,11 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             else:
                 messages = [{"role": "user", "content": str(prompt)}]
                 
-            model_name = self.model_name.replace("openrouter/", "")
+            model_name = self.model_name.replace("openrouter/", "").replace("groq/", "")
+            
+            # Default Groq model if unset or generic
+            if os.getenv("LLM_PROVIDER", "").lower() == "groq" and model_name in ["", "groq", "Qwen/Qwen2.5-7B-Instruct"]:
+                model_name = "llama-3.3-70b-versatile"
             
             response = client.chat.completions.create(
                 model=model_name,
@@ -539,7 +554,11 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             else:
                 messages = [{"role": "user", "content": str(prompt)}]
                 
-            model_name = self.model_name.replace("openrouter/", "")
+            model_name = self.model_name.replace("openrouter/", "").replace("groq/", "")
+            
+            # Default Groq model if unset or generic
+            if os.getenv("LLM_PROVIDER", "").lower() == "groq" and model_name in ["", "groq", "Qwen/Qwen2.5-7B-Instruct"]:
+                model_name = "llama-3.3-70b-versatile"
             
             yield "[STREAM_START]\n"
             
@@ -563,6 +582,85 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
         except Exception as e:
             logger.error(f"❌ OpenAI Compatible API Stream failed: {e}")
             yield f"\n⚠️ [ERROR] OpenAI API failed: {str(e)}"
+            yield "\n[STREAM_END]"
+
+    def _generate_via_groq_native(self, prompt: Any, max_tokens: int = 4096, temperature: float = 0.6) -> str:
+        """Native Groq generation using groq package."""
+        from groq import Groq
+        
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        
+        if isinstance(prompt, list):
+            messages = prompt
+        else:
+            messages = [{"role": "user", "content": str(prompt)}]
+            
+        model_name = self.model_name.replace("groq/", "")
+        
+        # Default Groq model if unset or generic
+        if os.getenv("LLM_PROVIDER", "").lower() == "groq" and model_name in ["", "groq", "Qwen/Qwen2.5-7B-Instruct"]:
+            model_name = "qwen-2.5-32b"
+            
+        try:
+            kwargs = {
+                "model": model_name,
+                "messages": messages,
+                "temperature": temperature,
+                "max_completion_tokens": max_tokens,
+                "top_p": 0.95,
+            }
+            if "deepseek" in model_name.lower() or "qwen" in model_name.lower():
+                kwargs["reasoning_effort"] = "default"
+                
+            response = client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"❌ Native Groq API failed: {e}")
+            raise e
+
+    def _generate_via_groq_native_stream(self, prompt: Any, max_tokens: int = 4096, temperature: float = 0.6) -> Generator[str, None, None]:
+        """Native Groq streaming generation using groq package."""
+        from groq import Groq
+        
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        
+        if isinstance(prompt, list):
+            messages = prompt
+        else:
+            messages = [{"role": "user", "content": str(prompt)}]
+            
+        model_name = self.model_name.replace("groq/", "")
+        
+        # Default Groq model if unset or generic
+        if os.getenv("LLM_PROVIDER", "").lower() == "groq" and model_name in ["", "groq", "Qwen/Qwen2.5-7B-Instruct"]:
+            model_name = "qwen-2.5-32b"
+            
+        try:
+            yield "[STREAM_START]\n"
+            
+            kwargs = {
+                "model": model_name,
+                "messages": messages,
+                "temperature": temperature,
+                "max_completion_tokens": max_tokens,
+                "top_p": 0.95,
+                "stream": True,
+                "stop": None
+            }
+            if "deepseek" in model_name.lower() or "qwen" in model_name.lower():
+                kwargs["reasoning_effort"] = "default"
+                
+            response = client.chat.completions.create(**kwargs)
+            
+            for chunk in response:
+                token = chunk.choices[0].delta.content if chunk.choices else None
+                if token:
+                    yield token
+                    
+            yield "\n[STREAM_END]"
+        except Exception as e:
+            logger.error(f"❌ Native Groq API Stream failed: {e}")
+            yield f"\n⚠️ [ERROR] Groq API failed: {str(e)}"
             yield "\n[STREAM_END]"
 
     def _generate_via_groq(
@@ -848,7 +946,12 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
             provider = os.getenv("LLM_PROVIDER", "").lower()
             key = os.getenv("LLM_API_KEY", "")
             openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+            groq_key = os.getenv("GROQ_API_KEY", "")
             
+            if provider == "groq" or groq_key:
+                logger.info(f"⚡ Using Native Groq API for {self.model_name}")
+                return self._generate_via_groq_native(prompt, max_tokens, temperature)
+                
             if provider in ["openrouter", "openai"] or key.startswith("sk-or-") or openrouter_key:
                 logger.info(f"⚡ Using OpenAI-compatible API for {self.model_name}")
                 return self._generate_via_openai_compatible(prompt, max_tokens, temperature)
@@ -919,7 +1022,17 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
             provider = os.getenv("LLM_PROVIDER", "").lower()
             key = os.getenv("LLM_API_KEY", "")
             openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+            groq_key = os.getenv("GROQ_API_KEY", "")
             
+            if provider == "groq" or groq_key:
+                logger.info(f"⚡ Using Native Groq API for streaming: {self.model_name}")
+                yield from self._generate_via_groq_native_stream(
+                    prompt=messages,
+                    max_tokens=max_new_tokens,
+                    temperature=temperature
+                )
+                return
+                
             if provider in ["openrouter", "openai"] or key.startswith("sk-or-") or openrouter_key:
                 logger.info(f"⚡ Using OpenAI-compatible API for streaming: {self.model_name}")
                 yield from self._generate_via_openai_compatible_stream(
