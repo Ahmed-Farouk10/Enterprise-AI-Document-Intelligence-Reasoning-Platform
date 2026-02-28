@@ -65,10 +65,10 @@ class RagSettings(BaseSettings):
     RAG_VECTOR_DB_URL: str = os.getenv("LANCEDB_URI", "/app/rag_data/lancedb")
     # RAG_VECTOR_DB_KEY: Not needed for LanceDB
 
-    # LLM & Embedding (Defaulting to Hugging Face for Spaces Compatibility)
-    LLM_PROVIDER: str = os.getenv("RAG_LLM_PROVIDER", "huggingface")
-    LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", "Qwen/Qwen2.5-72B-Instruct")
-    LLM_API_KEY: Optional[str] = os.getenv("LLM_API_KEY") or os.getenv("HF_TOKEN")
+    # LLM & Embedding (Defaulting to OpenRouter free models for Spaces Compatibility)
+    LLM_PROVIDER: str = os.getenv("RAG_LLM_PROVIDER", "openrouter")
+    LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", "google/gemini-2.0-flash-exp:free")
+    LLM_API_KEY: Optional[str] = os.getenv("LLM_API_KEY") or os.getenv("OPENROUTER_API_KEY")
     
     # Standard Embedding Config
     EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "fastembed")
@@ -76,7 +76,7 @@ class RagSettings(BaseSettings):
     EMBEDDING_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
 
     # Rag Processing Options
-    EXTRACTION_MODEL: str = os.getenv("RAG_LLM_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+    EXTRACTION_MODEL: str = os.getenv("RAG_LLM_MODEL", "google/gemini-2.0-flash-exp:free")
     GRAPH_DATABASE_URL: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 
     class Config:

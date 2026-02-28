@@ -26,10 +26,10 @@ def verify_storage_setup():
     # Configure LLM Defaults
     current_provider = os.getenv("LLM_PROVIDER", "").lower()
     if not current_provider:
-        os.environ["LLM_PROVIDER"] = "huggingface"
+        os.environ["LLM_PROVIDER"] = "openrouter"
         
     if not os.getenv("LLM_MODEL"):
-        os.environ["LLM_MODEL"] = "Qwen/Qwen2.5-7B-Instruct"
+        os.environ["LLM_MODEL"] = "google/gemini-2.0-flash-exp:free"
 
     if not os.getenv("LLM_API_KEY"):
          os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN") or "local"
