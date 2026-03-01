@@ -16,7 +16,7 @@ class CustomRagLLMEngine:
     Implements the protocol expected by Rag's LLMGateway.
     """
     def __init__(self):
-        self.provider = os.getenv("LLM_PROVIDER", "huggingface")
+        self.provider = (os.getenv("LLM_PROVIDER") or os.getenv("RAG_LLM_PROVIDER") or "huggingface").lower()
         self.model = getattr(llm_service, "model_name", "unknown")
         self.api_key = os.getenv("LLM_API_KEY", "local")
 

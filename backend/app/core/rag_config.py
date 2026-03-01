@@ -36,17 +36,13 @@ os.makedirs(_rag_root, exist_ok=True)
 os.environ["RAG_ROOT_DIR"] = _rag_root
 os.environ["RAG_DATABASE_URL"] = f"sqlite:///{_rag_root}/databases/rag_db.db"
 
-# CRITICAL FIX: Skip LLM connection test on HF Spaces
-# Rag's setup_and_check_environment() calls test_llm_connection() which hangs for 30+ seconds
-# when LLM_API_KEY is invalid. This causes pipeline timeout.
-if os.getenv("HF_TOKEN"):
-    # Force HuggingFace Provider for Rag
+# CRITICAL FIX: Only set default provider if none exists
+if os.getenv("HF_TOKEN") and not os.getenv("RAG_LLM_PROVIDER") and not os.getenv("LLM_PROVIDER"):
+    # Force HuggingFace Provider for Rag only as a last resort fallback
     os.environ["RAG_LLM_PROVIDER"] = "huggingface"
     os.environ["RAG_LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct" 
-    # Skip LLM connection test on HF Spaces
     os.environ["RAG_SKIP_LLM_TEST"] = "true"
-    logger_msg = "⚙️ Rag: Skipping LLM connection test (HF Spaces / no valid token)"
-    print(logger_msg)
+    print("⚙️ Rag: Defaulting to HuggingFace Provider on Spaces")
 # ---------------------------------------------------------
 
 class RagSettings(BaseSettings):
@@ -95,6 +91,10 @@ settings = RagSettings()
 # These are picked up by Rag's internal configuration
 os.environ["RAG_LLM_PROVIDER"] = settings.LLM_PROVIDER
 os.environ["RAG_LLM_MODEL"] = settings.LLM_MODEL
+os.environ["LLM_PROVIDER"] = settings.LLM_PROVIDER  # Synchronize standard env var
+os.environ["LLM_MODEL"] = settings.LLM_MODEL        # Synchronize standard env var
+
+
 os.environ["RAG_GRAPH_DB_TYPE"] = settings.RAG_GRAPH_DB_TYPE
 os.environ["RAG_GRAPH_URL"] = settings.RAG_GRAPH_URL
 os.environ["RAG_VECTOR_DB_TYPE"] = settings.RAG_VECTOR_DB_TYPE

@@ -610,8 +610,10 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             model_name == "Qwen/Qwen2.5-7B-Instruct"
         )
         
-        if os.getenv("LLM_PROVIDER", "").lower() == "groq" and is_generic_or_wrong:
+        if is_generic_or_wrong:
             # Default to the most powerful versatile model on Groq
+            # Note: We do this even if provider env is not strictly "groq" 
+            # because we are already inside the native groq generator.
             model_name = "llama-3.3-70b-versatile"
             
         try:
@@ -654,7 +656,7 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             model_name == "Qwen/Qwen2.5-7B-Instruct"
         )
         
-        if os.getenv("LLM_PROVIDER", "").lower() == "groq" and is_generic_or_wrong:
+        if is_generic_or_wrong:
             model_name = "llama-3.3-70b-versatile"
             
         try:
@@ -965,14 +967,16 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
         
         # If model not loaded (HF Spaces), use Inference API or Gemini SDK
         if self.model is None:
-            provider = os.getenv("LLM_PROVIDER", "").lower()
+            provider = (os.getenv("LLM_PROVIDER") or os.getenv("RAG_LLM_PROVIDER") or "").lower()
             key = os.getenv("LLM_API_KEY", "")
             openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
             groq_key = os.getenv("GROQ_API_KEY", "")
             
             if provider == "groq" or groq_key:
-                logger.info(f"⚡ Using Native Groq API for {self.model_name}")
-                return self._generate_via_groq_native(prompt, max_tokens, temperature)
+                 # Ensure we don't accidentally fall into groq if some other provider key is used
+                 # But since we have a groq key, it's generally safe.
+                 logger.info(f"⚡ Using Native Groq API for {self.model_name}")
+                 return self._generate_via_groq_native(prompt, max_tokens, temperature)
                 
             if provider in ["openrouter", "openai"] or key.startswith("sk-or-") or openrouter_key:
                 logger.info(f"⚡ Using OpenAI-compatible API for {self.model_name}")
@@ -1041,7 +1045,7 @@ REMINDER: Answer ONLY from the text between the ═══ markers above. If not 
 
         # Fallback to external APIs if model not loaded
         if self.model is None:
-            provider = os.getenv("LLM_PROVIDER", "").lower()
+            provider = (os.getenv("LLM_PROVIDER") or os.getenv("RAG_LLM_PROVIDER") or "").lower()
             key = os.getenv("LLM_API_KEY", "")
             openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
             groq_key = os.getenv("GROQ_API_KEY", "")
