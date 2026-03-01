@@ -367,6 +367,7 @@ async def stream_message(
         system_prompt += f"\n\nCONVERSATION HISTORY:\n{history_text}\n"
 
     async def event_generator():
+        nonlocal scoped_context
         full_response = ""
         document_context = {"scope": scope, "intent": intent}
         
