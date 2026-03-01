@@ -600,9 +600,19 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             
         model_name = self.model_name.replace("groq/", "")
         
-        # Default Groq model if unset or generic
-        if os.getenv("LLM_PROVIDER", "").lower() == "groq" and model_name in ["", "groq", "Qwen/Qwen2.5-7B-Instruct"]:
-            model_name = "qwen-2.5-32b"
+        # VALIDATION: Ensure we don't send non-Groq model names (like Gemini/OpenRouter) to Groq API
+        is_generic_or_wrong = (
+            not model_name or 
+            model_name == "groq" or 
+            "gemini" in model_name.lower() or 
+            "google" in model_name.lower() or
+            "qwen/qwen" in model_name.lower() or
+            model_name == "Qwen/Qwen2.5-7B-Instruct"
+        )
+        
+        if os.getenv("LLM_PROVIDER", "").lower() == "groq" and is_generic_or_wrong:
+            # Default to the most powerful versatile model on Groq
+            model_name = "llama-3.3-70b-versatile"
             
         try:
             kwargs = {
@@ -612,13 +622,13 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                 "max_completion_tokens": max_tokens,
                 "top_p": 0.95,
             }
-            if "deepseek" in model_name.lower() or "qwen" in model_name.lower():
+            if "deepseek" in model_name.lower() or "qwen" in model_name.lower() or "r1" in model_name.lower():
                 kwargs["reasoning_effort"] = "default"
                 
             response = client.chat.completions.create(**kwargs)
             return response.choices[0].message.content
         except Exception as e:
-            logger.error(f"❌ Native Groq API failed: {e}")
+            logger.error(f"❌ Native Groq API failed for model {model_name}: {e}")
             raise e
 
     def _generate_via_groq_native_stream(self, prompt: Any, max_tokens: int = 4096, temperature: float = 0.6) -> Generator[str, None, None]:
@@ -634,9 +644,18 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
             
         model_name = self.model_name.replace("groq/", "")
         
-        # Default Groq model if unset or generic
-        if os.getenv("LLM_PROVIDER", "").lower() == "groq" and model_name in ["", "groq", "Qwen/Qwen2.5-7B-Instruct"]:
-            model_name = "qwen-2.5-32b"
+        # VALIDATION: Ensure we don't send non-Groq model names to Groq API
+        is_generic_or_wrong = (
+            not model_name or 
+            model_name == "groq" or 
+            "gemini" in model_name.lower() or 
+            "google" in model_name.lower() or
+            "qwen/qwen" in model_name.lower() or
+            model_name == "Qwen/Qwen2.5-7B-Instruct"
+        )
+        
+        if os.getenv("LLM_PROVIDER", "").lower() == "groq" and is_generic_or_wrong:
+            model_name = "llama-3.3-70b-versatile"
             
         try:
             yield "[STREAM_START]\n"
@@ -650,7 +669,7 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                 "stream": True,
                 "stop": None
             }
-            if "deepseek" in model_name.lower() or "qwen" in model_name.lower():
+            if "deepseek" in model_name.lower() or "qwen" in model_name.lower() or "r1" in model_name.lower():
                 kwargs["reasoning_effort"] = "default"
                 
             response = client.chat.completions.create(**kwargs)
@@ -662,7 +681,7 @@ Clearly label: "[EXTERNAL BENCHMARK]" vs "[DOCUMENT FACT]"
                     
             yield "\n[STREAM_END]"
         except Exception as e:
-            logger.error(f"❌ Native Groq API Stream failed: {e}")
+            logger.error(f"❌ Native Groq API Stream failed for model {model_name}: {e}")
             yield f"\n⚠️ [ERROR] Groq API failed: {str(e)}"
             yield "\n[STREAM_END]"
 

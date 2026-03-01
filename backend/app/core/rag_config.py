@@ -68,6 +68,11 @@ class RagSettings(BaseSettings):
     # LLM & Embedding (Defaulting to OpenRouter free models for Spaces Compatibility)
     LLM_PROVIDER: str = os.getenv("RAG_LLM_PROVIDER", "openrouter")
     LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", "google/gemini-2.0-flash-exp:free")
+    
+    # Validation: If provider is Groq, ensure model is not a Gemini one
+    if LLM_PROVIDER.lower() == "groq" and "gemini" in LLM_MODEL.lower():
+         LLM_MODEL = "llama-3.3-70b-versatile"
+         
     LLM_API_KEY: Optional[str] = os.getenv("LLM_API_KEY") or os.getenv("OPENROUTER_API_KEY")
     GROQ_API_KEY: Optional[str] = os.getenv("GROQ_API_KEY")
     

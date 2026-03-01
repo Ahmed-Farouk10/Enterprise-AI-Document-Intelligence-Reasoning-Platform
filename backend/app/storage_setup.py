@@ -26,15 +26,20 @@ def verify_storage_setup():
     # Configure LLM Defaults
     current_provider = os.getenv("LLM_PROVIDER", "").lower()
     if not current_provider:
-        os.environ["LLM_PROVIDER"] = "openrouter"
+        current_provider = "openrouter"
+        os.environ["LLM_PROVIDER"] = current_provider
         
-    if not os.getenv("LLM_MODEL"):
-        os.environ["LLM_MODEL"] = "google/gemini-2.0-flash-exp:free"
+    current_model = os.getenv("LLM_MODEL")
+    if not current_model:
+        if current_provider == "groq":
+             os.environ["LLM_MODEL"] = "llama-3.3-70b-versatile"
+        else:
+             os.environ["LLM_MODEL"] = "google/gemini-2.0-flash-exp:free"
 
     if not os.getenv("LLM_API_KEY"):
          os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN") or "local"
     
-    log(f"[SETUP] Basic LLM Configuration Complete.")
+    log(f"[SETUP] Basic LLM Configuration Complete (Provider: {current_provider}).")
 
 # Execute verification on import
 verify_storage_setup()
