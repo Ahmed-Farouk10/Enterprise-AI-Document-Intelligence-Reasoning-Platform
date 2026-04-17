@@ -143,12 +143,12 @@ export function useChat(options: UseChatOptions = {}) {
                                 const lastMsg = newMessages[newMessages.length - 1];
                                 if (lastMsg.id === assistantMessageId) {
                                     lastMsg.content = chunk.data; // Ensure consistency
-                                    if (chunk.document_context) {
-                                        // Map backend snake_case to frontend camelCase
+                                    if (chunk.documentContext) {
                                         lastMsg.documentContext = {
-                                            documentId: chunk.document_context.document_id,
-                                            documentName: chunk.document_context.document_name,
-                                            relevantChunks: chunk.document_context.relevant_chunks
+                                            documentId: chunk.documentContext.documentId,
+                                            documentName: chunk.documentContext.documentName,
+                                            relevantChunks: chunk.documentContext.relevantChunks,
+                                            numDocuments: chunk.documentContext.numDocuments
                                         };
                                     }
                                 }

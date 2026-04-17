@@ -26,35 +26,26 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 # ==================== SCHEMAS ====================
 
-class ChatSessionCreate(BaseModel):
-    title: str = Field(default="New Analysis Session")
-    document_ids: List[str] = Field(default_factory=list)
+from app.schemas import (
+    ChatSessionCreate, 
+    ChatSessionResponse, 
+    ChatMessageCreate, 
+    ChatMessageResponse,
+    ApiResponse
+)
 
-
-class ChatMessageCreate(BaseModel):
-    content: str = Field(..., min_length=1, max_length=10000)
+# Remove local schemas as they are now imported from app.schemas
 
 
 # ==================== SESSION MANAGEMENT ====================
 
-@router.get("/sessions")
+@router.get("/sessions", response_model=List[ChatSessionResponse])
 async def get_sessions(db: Session = Depends(get_db)):
     """Retrieve all chat sessions"""
-    sessions = DatabaseService.get_all_sessions(db)
-    return [
-        {
-            "id": s.id,
-            "title": s.title,
-            "created_at": s.created_at.isoformat(),
-            "updated_at": s.updated_at.isoformat(),
-            "document_ids": s.document_ids or [],
-            "message_count": len(s.messages) if hasattr(s, 'messages') else 0
-        }
-        for s in sessions
-    ]
+    return DatabaseService.get_all_sessions(db)
 
 
-@router.post("/sessions")
+@router.post("/sessions", response_model=ChatSessionResponse)
 @limiter.limit("20/minute")
 async def create_session(
     request: Request,
@@ -75,17 +66,10 @@ async def create_session(
             cag_engine.precompute_context(session_data.document_ids)
         )
 
-    return {
-        "id": session.id,
-        "title": session.title,
-        "created_at": session.created_at.isoformat(),
-        "updated_at": session.updated_at.isoformat(),
-        "document_ids": session.document_ids or [],
-        "messages": []
-    }
+    return session
 
 
-@router.get("/sessions/{session_id}")
+@router.get("/sessions/{session_id}", response_model=ChatSessionResponse)
 async def get_session(session_id: str, db: Session = Depends(get_db)):
     """Get session with messages"""
     session = DatabaseService.get_chat_session(db, session_id)
@@ -93,23 +77,11 @@ async def get_session(session_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Session not found")
 
     messages = DatabaseService.get_session_messages(db, session_id)
-
-    return {
-        "id": session.id,
-        "title": session.title,
-        "created_at": session.created_at.isoformat(),
-        "updated_at": session.updated_at.isoformat(),
-        "document_ids": session.document_ids or [],
-        "messages": [
-            {
-                "id": m.id,
-                "role": m.role,
-                "content": m.content,
-                "timestamp": m.timestamp.isoformat()
-            }
-            for m in messages
-        ]
-    }
+    
+    # Update messages on the session object for the response model
+    session.messages = messages
+    
+    return session
 
 
 @router.delete("/sessions/{session_id}")
@@ -154,7 +126,7 @@ async def update_session(
 
 # ==================== MESSAGE PROCESSING ====================
 
-@router.post("/sessions/{session_id}/messages")
+@router.post("/sessions/{session_id}/messages", response_model=ChatMessageResponse)
 @limiter.limit("30/minute")
 async def send_message(
     request: Request,
@@ -198,7 +170,7 @@ async def send_message(
     )
 
     # Generate response with personality and optimization
-    response = llm_service.generate_with_context(
+    response_text = llm_service.generate_with_context(
         question=message_data.content,
         context=context,
         conversation_history=conversation_history[-6:] if conversation_history else None,
@@ -207,18 +179,12 @@ async def send_message(
         max_context_chars=3000  # Token optimization
     )
 
-    # Check for errors
-    if response.startswith("Error:"):
-        ai_content = response
-    else:
-        ai_content = response
-
     # Save AI response
     ai_msg = DatabaseService.create_message(
         db=db,
         session_id=session_id,
         role="assistant",
-        content=ai_content,
+        content=response_text,
         document_context={
             "intent": intent,
             "depth": depth,
@@ -227,18 +193,7 @@ async def send_message(
         }
     )
 
-    return {
-        "id": ai_msg.id,
-        "role": "assistant",
-        "content": ai_content,
-        "timestamp": ai_msg.timestamp.isoformat(),
-        "metadata": {
-            "intent": intent,
-            "depth": depth,
-            "num_documents": len(session.document_ids or []),
-            "tokens_estimated": len(ai_content.split())
-        }
-    }
+    return ai_msg
 
 
 @router.post("/sessions/{session_id}/stream")
@@ -336,8 +291,8 @@ async def stream_message(
 
             yield _sse_event("done", full_response, {
                 "intent": intent,
-                "num_documents": len(session.document_ids or []),
-                "tokens_used": len(full_response.split())
+                "numDocuments": len(session.document_ids or []),
+                "tokensUsed": len(full_response.split())
             })
 
         except Exception as e:

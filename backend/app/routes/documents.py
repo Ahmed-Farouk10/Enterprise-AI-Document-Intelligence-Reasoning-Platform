@@ -197,20 +197,7 @@ async def upload_document(
         logger.info(f"🚀 Dispatched background processing for {document.id}")
         
         # Return immediately with pending status
-        return {
-            "id": document.id,
-            "filename": document.filename,
-            "original_name": document.original_name,
-            "file_size": document.file_size,
-            "mime_type": document.mime_type,
-            "uploaded_at": document.created_at.isoformat(),
-            "processed_at": None,
-            "status": "pending",
-            "version": document.version,
-            "metadata": {
-                "message": "Upload successful. Processing in background."
-            }
-        }
+        return document
     
     except Exception as e:
         logger.error("document_upload_failed", error=str(e), exc_info=True)
@@ -227,29 +214,13 @@ async def get_documents(
     skip = (page - 1) * page_size
     documents, total = DatabaseService.get_documents(db, skip=skip, limit=page_size)
     
-    # Convert ORM objects to dicts
-    items = [{
-        "id": doc.id,
-        "filename": doc.filename,
-        "original_name": doc.original_name,
-        "file_size": doc.file_size,
-        "mime_type": doc.mime_type,
-        "uploaded_at": doc.created_at.isoformat(),
-        "processed_at": doc.updated_at.isoformat() if doc.status == "completed" else None,
-        "status": doc.status,
-        "version": doc.version,
-        "metadata": doc.extra_data or {}
-    } for doc in documents]
-    
-    total_pages = (total + page_size - 1) // page_size
-    
     return {
-        "items": items,
+        "items": documents,
         "meta": {
             "page": page,
             "page_size": page_size,
             "total": total,
-            "total_pages": total_pages
+            "total_pages": (total + page_size - 1) // page_size
         }
     }
 
@@ -260,18 +231,7 @@ async def get_document(document_id: str, db: Session = Depends(get_db)):
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    return {
-        "id": document.id,
-        "filename": document.filename,
-        "original_name": document.original_name,
-        "file_size": document.file_size,
-        "mime_type": document.mime_type,
-        "uploaded_at": document.created_at.isoformat(),
-        "processed_at": document.updated_at.isoformat() if document.status == "completed" else None,
-        "status": document.status,
-        "version": document.version,
-        "metadata": document.extra_data or {}
-    }
+    return document
 
 @router.delete("/{document_id}")
 async def delete_document(document_id: str, db: Session = Depends(get_db)):

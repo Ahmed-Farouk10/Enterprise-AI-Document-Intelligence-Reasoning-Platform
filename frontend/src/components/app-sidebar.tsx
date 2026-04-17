@@ -160,7 +160,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         id: session.id,
         name: session.title || 'New Chat',
         url: '#',
-        date: new Date(session.updated_at || session.created_at).toLocaleDateString()
+        date: new Date(session.updatedAt || session.createdAt).toLocaleDateString()
     }))
 
     const handleSessionDelete = async (id: string) => {
