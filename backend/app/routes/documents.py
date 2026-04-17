@@ -200,9 +200,23 @@ async def upload_document(
         return document
     
     except Exception as e:
-        logger.error("document_upload_failed", error=str(e), exc_info=True)
-        await storage_service.delete_file(unique_filename)
-        raise HTTPException(status_code=500, detail=f"Failed to upload document: {str(e)}")
+        logger.error(f"❌ Document upload failed: {str(e)}", exc_info=True)
+        # Attempt to clean up if filename was generated
+        try:
+            if 'unique_filename' in locals():
+                await storage_service.delete_file(unique_filename)
+        except:
+            pass
+        
+        # Return the specific error message to help debugging
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "message": "Failed to upload document",
+                "error": str(e),
+                "path": str(settings.database.UPLOAD_DIR)
+            }
+        )
 
 @router.get("", response_model=PaginatedDocuments)
 async def get_documents(

@@ -60,9 +60,9 @@ class LLMConfig(BaseSettingsExtra):
 
 class DatabaseConfig(BaseSettingsExtra):
     """Database Configuration"""
-    DATABASE_URL: str = Field(default="sqlite:///./data/app.db")
-    STORAGE_ROOT: str = Field(default="./data")
-    UPLOAD_DIR: str = Field(default="./data/uploads")
+    DATABASE_URL: str = Field(default="sqlite:////app/.cache/app_data/databases/app.db")
+    STORAGE_ROOT: str = Field(default="/app/.cache/app_data")
+    UPLOAD_DIR: str = Field(default="/app/.cache/app_data/uploads")
     # Supabase Specifics
     SUPABASE_URL: Optional[str] = Field(default=None)
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = Field(default=None)
