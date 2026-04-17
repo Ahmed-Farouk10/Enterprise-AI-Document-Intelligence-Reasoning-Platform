@@ -12,18 +12,17 @@ from app.core.logging_config import get_logger
 logger = get_logger(__name__)
 
 def get_limiter_storage_uri():
-    """Get Redis storage URI for rate limiting"""
-    # Use the same Redis URL as the cache/celery
-    # slowapi expects 'redis://host:port/db'
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    """Get Redis storage URI for rate limiting with failsafe"""
+    redis_url = os.getenv("REDIS_URL", "").strip()
     
-    # If using rediss (SSL), ensure compatibility
-    if not redis_url.startswith("redis://") and not redis_url.startswith("rediss://"):
+    # Check if empty or local
+    if not redis_url or "localhost" in redis_url or "127.0.0.1" in redis_url:
+        logger.info("rate_limiter_memory_fallback", reason="no_remote_redis")
         return "memory://"
     
-    # Fallback to memory if localhost (for Cloud Spaces without sidecar Redis)
-    if "localhost" in redis_url or "127.0.0.1" in redis_url:
-        logger.info("rate_limiter_memory_fallback", reason="localhost_redis_detected")
+    # Ensure it starts with correct prefix
+    if not redis_url.startswith("redis://") and not redis_url.startswith("rediss://"):
+        logger.warning("rate_limiter_invalid_url", url=redis_url[:10] + "...")
         return "memory://"
         
     return redis_url
