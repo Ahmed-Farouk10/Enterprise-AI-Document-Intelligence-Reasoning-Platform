@@ -19,11 +19,11 @@ if not os.getenv("LLM_API_KEY"):
 # --- CRITICAL: INHERIT FROM CENTRAL SETUP ---
 # We reuse the logic from app/rag_setup.py to ensure consistency
 try:
-    from app.rag_setup import RAG_ROOT, verify_rag_setup
+    from app.storage_setup import STORAGE_ROOT as RAG_ROOT, verify_storage_setup
 except ImportError:
     # If import fails (e.g. running script directly), define basic fallback
     # But ideally, this should never happen in the app context
-    print("⚠️ WARNING: Could not import rag_setup. Using fallback defaults.")
+    print("⚠️ WARNING: Could not import storage_setup. Using fallback defaults.")
     RAG_ROOT = "/app/.cache/rag_data"
 
 _rag_root = RAG_ROOT
@@ -61,9 +61,9 @@ class RagSettings(BaseSettings):
     RAG_VECTOR_DB_URL: str = os.getenv("LANCEDB_URI", "/app/rag_data/lancedb")
     # RAG_VECTOR_DB_KEY: Not needed for LanceDB
 
-    # LLM & Embedding (Defaulting to OpenRouter free models for Spaces Compatibility)
-    LLM_PROVIDER: str = os.getenv("RAG_LLM_PROVIDER", "openrouter")
-    LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", "google/gemini-2.0-flash-exp:free")
+    # LLM & Embedding (Prioritize system LLM_PROVIDER, default to groq for local speed)
+    LLM_PROVIDER: str = os.getenv("RAG_LLM_PROVIDER", os.getenv("LLM_PROVIDER", "groq"))
+    LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
     
     # Validation: If provider is Groq, ensure model is not a Gemini one
     if LLM_PROVIDER.lower() == "groq" and "gemini" in LLM_MODEL.lower():
@@ -78,12 +78,13 @@ class RagSettings(BaseSettings):
     EMBEDDING_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
 
     # Rag Processing Options
-    EXTRACTION_MODEL: str = os.getenv("RAG_LLM_MODEL", "google/gemini-2.0-flash-exp:free")
+    EXTRACTION_MODEL: str = os.getenv("RAG_LLM_MODEL", LLM_MODEL) # Sync with main model
     GRAPH_DATABASE_URL: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore" # Allow .env variables not defined in this class
 
 settings = RagSettings()
 

@@ -155,12 +155,39 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         date: new Date(doc.uploadedAt).toLocaleDateString(),
     }))
 
-    // Map chat sessions for NavHistory
+    // Map chat sessions for NavHistory — include IDs for delete
     const mappedChats = chatSessions.map(session => ({
+        id: session.id,
         name: session.title || 'New Chat',
-        url: '#', // TODO: Add routing to specific chat
+        url: '#',
         date: new Date(session.updated_at || session.created_at).toLocaleDateString()
     }))
+
+    const handleSessionDelete = async (id: string) => {
+        try {
+            const response = await ChatAPI.deleteSession(id)
+            if (response.success) {
+                setChatSessions(prev => prev.filter(s => s.id !== id))
+                toast({
+                    title: "Chat Deleted",
+                    description: "The chat session has been removed.",
+                })
+            } else {
+                toast({
+                    title: "Delete Failed",
+                    description: response.error?.message || 'Failed to delete chat',
+                    variant: "destructive",
+                })
+            }
+        } catch (err) {
+            console.error("Failed to delete session", err)
+            toast({
+                title: "Delete Failed",
+                description: "An error occurred while deleting the chat.",
+                variant: "destructive",
+            })
+        }
+    }
 
     // Track upload progress
     React.useEffect(() => {
@@ -187,7 +214,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     loading={loading}
                     onDelete={handleDelete}
                 />
-                <NavHistory chats={mappedChats} loading={sessionsLoading} />
+                <NavHistory chats={mappedChats} loading={sessionsLoading} onDelete={handleSessionDelete} />
                 <NavSystemStatus />
             </SidebarContent>
             <SidebarRail />

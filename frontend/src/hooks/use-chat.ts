@@ -1,8 +1,10 @@
 "use client"
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { ChatMessage, ChatSession } from '@/types'
 import { ChatAPI } from '@/lib/api/chat'
+
+const SESSION_STORAGE_KEY = 'docucentric_chat_session_id'
 
 interface UseChatOptions {
     sessionId?: string
@@ -12,7 +14,27 @@ interface UseChatOptions {
 export function useChat(options: UseChatOptions = {}) {
     const { sessionId: initialSessionId, documentIds = [] } = options
 
-    const [sessionId, setSessionId] = useState<string | null>(initialSessionId || null)
+    // Restore sessionId from sessionStorage on first mount
+    const [sessionId, _setSessionId] = useState<string | null>(() => {
+        if (initialSessionId) return initialSessionId
+        if (typeof window !== 'undefined') {
+            return sessionStorage.getItem(SESSION_STORAGE_KEY) || null
+        }
+        return null
+    })
+
+    // Wrapper that also persists to sessionStorage
+    const setSessionId = useCallback((id: string | null) => {
+        _setSessionId(id)
+        if (typeof window !== 'undefined') {
+            if (id) {
+                sessionStorage.setItem(SESSION_STORAGE_KEY, id)
+            } else {
+                sessionStorage.removeItem(SESSION_STORAGE_KEY)
+            }
+        }
+    }, [])
+
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -70,6 +92,10 @@ export function useChat(options: UseChatOptions = {}) {
                     return { success: false, error: 'Failed to create session' }
                 }
                 currentSessionId = createResult.session.id
+            } else if (docIds && docIds.length > 0) {
+                // If session exists but document selection changed, update it
+                // This ensures multi-document retrieval is updated on-the-fly
+                await ChatAPI.updateSession(currentSessionId, docIds)
             }
 
             // Add user message optimistically
@@ -106,7 +132,7 @@ export function useChat(options: UseChatOptions = {}) {
                                 const newMessages = [...prev];
                                 const lastMsg = newMessages[newMessages.length - 1];
                                 if (lastMsg.id === assistantMessageId) {
-                                    lastMsg.content += chunk.content;
+                                    lastMsg.content += chunk.data;
                                 }
                                 return newMessages;
                             });
@@ -116,7 +142,7 @@ export function useChat(options: UseChatOptions = {}) {
                                 const newMessages = [...prev];
                                 const lastMsg = newMessages[newMessages.length - 1];
                                 if (lastMsg.id === assistantMessageId) {
-                                    lastMsg.content = chunk.content; // Ensure consistency
+                                    lastMsg.content = chunk.data; // Ensure consistency
                                     if (chunk.document_context) {
                                         // Map backend snake_case to frontend camelCase
                                         lastMsg.documentContext = {
@@ -135,7 +161,7 @@ export function useChat(options: UseChatOptions = {}) {
                                 const lastMsg = newMessages[newMessages.length - 1];
                                 if (lastMsg.id === assistantMessageId) {
                                     // Update Reasoning - Immutable Update
-                                    const newReasoning = [...(lastMsg.reasoning || []), chunk.content];
+                                    const newReasoning = [...(lastMsg.reasoning || []), chunk.data];
 
                                     newMessages[newMessages.length - 1] = {
                                         ...lastMsg,
@@ -146,13 +172,22 @@ export function useChat(options: UseChatOptions = {}) {
                             });
                             setIsTyping(false);
                         } else if (chunk.type === 'error') {
-                            setError(chunk.content);
+                            setError(chunk.data);
                             setIsTyping(false);
                         }
                     }
                 );
                 return { success: true }
             } catch (err: any) {
+                // If 404 (Session Not Found), clear session and retry ONCE
+                if (err.message === 'Not Found' || err.status === 404) {
+                    console.warn("Session not found (404), clearing stale session and retrying...");
+                    clearSession();
+                    // Remove the placeholder assistant message before retrying
+                    setMessages((prev) => prev.filter((m) => m.id !== assistantMessageId));
+                    return sendMessage(content, docIds);
+                }
+
                 // Remove optimistic messages on error
                 setMessages((prev) => prev.filter((m) => m.id !== userMessage.id && m.id !== assistantMessageId))
                 setError(err.message || 'Failed to send message')
@@ -167,10 +202,10 @@ export function useChat(options: UseChatOptions = {}) {
      * Clear current session
      */
     const clearSession = useCallback(() => {
-        setSessionId(null)
+        setSessionId(null)   // also clears sessionStorage via wrapper
         setMessages([])
         setError(null)
-    }, [])
+    }, [setSessionId])
 
     /**
      * Delete session

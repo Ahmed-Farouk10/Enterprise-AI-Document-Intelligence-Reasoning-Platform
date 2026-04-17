@@ -55,6 +55,17 @@ class DatabaseService:
             .limit(limit)\
             .all()
         return docs, total
+
+    @staticmethod
+    def get_all_documents(
+        db: Session,
+        page: int = 1,
+        page_size: int = 20
+    ) -> List[Document]:
+        """Get all documents (for graph visualization)"""
+        skip = (page - 1) * page_size
+        docs, _ = DatabaseService.get_documents(db, skip=skip, limit=page_size)
+        return docs
     
     @staticmethod
     def get_document(db: Session, doc_id: str) -> Optional[Document]:

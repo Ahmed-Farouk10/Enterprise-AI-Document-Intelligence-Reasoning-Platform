@@ -4,12 +4,10 @@ import uuid
 from typing import List, Set
 from app.core.rag_config import settings as rag_settings
 
-try:
-    from rag.modules.users.models import User
-except ImportError:
-    class User:
-        def __init__(self, id):
-            self.id = id
+# Minimal mock for User if not available
+class User:
+    def __init__(self, id):
+        self.id = id
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +76,10 @@ class MemifyService:
         
         for dataset in list(self.active_datasets):
             try:
-                logger.info(f"🧠 Memify: Optimizing dataset '{dataset}'")
-                # We perform a lightweight cognify or specialized task here
-                # For now, we re-run cognify to ensure graph integrity
-                await rag.cognify(datasets=[dataset], user=user)
+                logger.debug(f"🧠 Memify: Maintenance check for '{dataset}' (CAG optimized)")
+                # In the new architecture, CAG handles optimization via caching
+                # No manual graph condensation is required.
+                pass
                 
             except Exception as e:
                 logger.warning(f"⚠️ Memify optimization failed for {dataset}: {e}")

@@ -30,27 +30,30 @@ export function KnowledgeGraphVisualization() {
         const fetchGraphData = async () => {
             try {
                 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-                const response = await fetch(`${apiUrl}/api/graph/nodes?limit=50`)
+                const response = await fetch(`${apiUrl}/api/graph/data`)
 
                 if (!response.ok) {
+                    console.error('Graph API response not ok:', response.status)
                     throw new Error('Failed to fetch graph data')
                 }
 
                 const data = await response.json()
+                console.log('Graph data received:', data)
 
                 // Transform API data to component format
                 const transformedNodes: Node[] = data.nodes.map((node: any) => ({
                     id: node.id,
                     label: node.label,
-                    type: node.type
+                    type: node.type || 'document'
                 }))
 
                 const transformedEdges: Edge[] = data.edges.map((edge: any) => ({
                     source: edge.source,
                     target: edge.target,
-                    label: edge.label
+                    label: edge.type || 'related'
                 }))
 
+                console.log('Transformed nodes:', transformedNodes.length, 'edges:', transformedEdges.length)
                 setNodes(transformedNodes)
                 setEdges(transformedEdges)
             } catch (error) {

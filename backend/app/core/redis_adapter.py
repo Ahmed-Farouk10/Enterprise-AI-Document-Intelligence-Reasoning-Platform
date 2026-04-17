@@ -339,11 +339,12 @@ class RedisCacheAdapter:
 # Initialize with settings from config
 from app.config import settings
 
+# Upstash/Cloud Redis often require SSL
+use_ssl = settings.redis.REDIS_URL.startswith("rediss://")
+
 redis_adapter = RedisCacheAdapter(
-    host=settings.REDIS_HOST,
-    port=settings.REDIS_PORT,
-    db=settings.REDIS_DB,
-    password=settings.REDIS_PASSWORD,
-    ssl=settings.REDIS_SSL,
-    max_connections=settings.REDIS_MAX_CONNECTIONS
+    host=settings.redis.REDIS_URL, # Redis.from_url can handle the full URL
+    max_connections=settings.redis.REDIS_MAX_CONNECTIONS,
+    socket_timeout=settings.redis.REDIS_SOCKET_TIMEOUT,
+    ssl=use_ssl
 )

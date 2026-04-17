@@ -18,21 +18,34 @@ import {
     useSidebar,
 } from "@/components/ui/sidebar"
 
+interface ChatItem {
+    id: string
+    name: string
+    url: string
+    date: string
+}
+
 export function NavHistory({
     chats,
     loading = false,
+    onDelete,
 }: {
-    chats: {
-        name: string
-        url: string
-        date: string
-    }[]
+    chats: ChatItem[]
     loading?: boolean
+    onDelete?: (id: string) => Promise<void>
 }) {
     const { isMobile } = useSidebar()
 
     // Import here to avoid circular dependencies if any
     const { NavHistorySkeleton } = require("@/components/skeletons")
+
+    const handleDelete = async (e: React.MouseEvent, chatId: string) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (onDelete) {
+            await onDelete(chatId)
+        }
+    }
 
     return (
         <SidebarGroup className="group-data-[collapsible=icon]:hidden">
@@ -48,7 +61,7 @@ export function NavHistory({
                     </SidebarMenuItem>
                 ) : (
                     chats.map((item) => (
-                        <SidebarMenuItem key={item.name}>
+                        <SidebarMenuItem key={item.id}>
                             <SidebarMenuButton asChild>
                                 <a href={item.url}>
                                     <MessageSquare />
@@ -67,8 +80,11 @@ export function NavHistory({
                                     side={isMobile ? "bottom" : "right"}
                                     align={isMobile ? "end" : "start"}
                                 >
-                                    <DropdownMenuItem>
-                                        <Trash2 className="text-muted-foreground" />
+                                    <DropdownMenuItem
+                                        onClick={(e) => handleDelete(e, item.id)}
+                                        className="text-destructive focus:text-destructive"
+                                    >
+                                        <Trash2 className="text-destructive" />
                                         <span>Delete Chat</span>
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>

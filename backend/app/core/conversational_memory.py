@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import logging
 
 from app.core.redis_adapter import redis_adapter
-from app.services.embeddings import SentenceTransformerEmbeddingEngine
+from app.services.embeddings import LocalEmbeddingEngine
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class ConversationalMemory:
         self.short_term_ttl = timedelta(hours=1)
         self.working_memory_limit = 10
         try:
-            self.embedding_engine = SentenceTransformerEmbeddingEngine()
+            self.embedding_engine = LocalEmbeddingEngine()
         except Exception as e:
             logger.error(f"Failed to load embedding engine for memory: {e}")
             self.embedding_engine = None

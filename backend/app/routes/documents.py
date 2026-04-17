@@ -12,16 +12,13 @@ from app.db.models import Document
 from app.db.service import DatabaseService
 from app.core.rate_limiter import limiter
 from app.core.logging_config import get_logger
+from app.services.storage import storage_service
 import uuid
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 logger = get_logger(__name__)
 
-# Ensure upload directory exists
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-async def process_document_background(document_id: str, file_path: Path, mime_type: str, original_filename: str):
+async def process_document_background(document_id: str, filename: str, mime_type: str, original_filename: str):
     """Background task for document processing"""
     try:
         logger.info(f"🔄 Starting background processing for doc_id={document_id}")
@@ -35,14 +32,32 @@ async def process_document_background(document_id: str, file_path: Path, mime_ty
                 return
 
             try:
+                # 1. Get file content (download if using cloud storage)
+                content = await storage_service.download_file(filename)
+                if not content:
+                    logger.error(f"❌ Could not retrieve file content for {filename}")
+                    document.status = "failed"
+                    db.commit()
+                    return
+
+                # Create temporary file for OCR if not exists locally
+                temp_path = storage_service.get_file_path(filename)
+                if not temp_path:
+                    temp_path = Path(f"/tmp/{filename}")
+                    temp_path.write_bytes(content)
+                
                 # Extract text using OCR Service
                 from app.services.ocr import ocr_service
-                text = ocr_service.extract_text(file_path, mime_type)
+                text = ocr_service.extract_text(temp_path, mime_type)
                 
+                # Cleanup temp file if it was created in /tmp
+                if temp_path.parent == Path("/tmp"):
+                    temp_path.unlink()
+
                 # Index in Vector Database
                 if text and len(text.strip()) > 10:
                     try:
-                        # 1. Store chunks in LanceDB
+                        # 1. Store chunks in Vector Store (LanceDB or Supabase)
                         from app.services.vector_store import vector_store_service
                         logger.info(f"💾 Vectorizing document {document_id}")
                         
@@ -75,10 +90,10 @@ async def process_document_background(document_id: str, file_path: Path, mime_ty
                         if is_success:
                            extra_data = {
                                 "graph_stats": {
-                                    "entity_count": chunks_inserted, # Use chunks indexed as "entity" equivalent
+                                    "entity_count": chunks_inserted, 
                                     "document_type": pipeline_result.document_type,
                                     "dataset_name": pipeline_result.dataset,
-                                    "entities": pipeline_result.entities or {} # Contains resume counts etc
+                                    "entities": pipeline_result.entities or {} 
                                 }
                            }
                            
@@ -114,8 +129,10 @@ async def process_document_background(document_id: str, file_path: Path, mime_ty
         logger.error(f"🔥 Critical background task error: {e_outer}")
 
 
+from app.config import settings
+
 @router.post("/upload", response_model=DocumentResponse)
-@limiter.limit("10/hour")
+@limiter.limit(settings.rate_limit.UPLOAD_RATE)
 async def upload_document(
     request: Request, 
     response: Response, 
@@ -134,14 +151,15 @@ async def upload_document(
     file_extension = Path(file.filename).suffix
     file_stem = Path(file.filename).stem
     unique_filename = f"{uuid.uuid4().hex[:8]}_{file_stem}{file_extension}"
-    file_path = UPLOAD_DIR / unique_filename
     
-    # Save file
+    # Save file using storage_service
     try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        await storage_service.upload_file(file.file, unique_filename, file.content_type)
         
-        file_size = os.path.getsize(file_path)
+        # Get file size safely
+        file.file.seek(0, os.SEEK_END)
+        file_size = file.file.tell()
+        file.file.seek(0)
         
         # Check for existing versions
         existing_docs = db.query(Document).filter(
@@ -171,7 +189,7 @@ async def upload_document(
         background_tasks.add_task(
             process_document_background, 
             str(document.id), 
-            file_path, 
+            unique_filename, 
             file.content_type, 
             file.filename
         )
@@ -196,8 +214,7 @@ async def upload_document(
     
     except Exception as e:
         logger.error("document_upload_failed", error=str(e), exc_info=True)
-        if file_path.exists():
-            os.remove(file_path)
+        await storage_service.delete_file(unique_filename)
         raise HTTPException(status_code=500, detail=f"Failed to upload document: {str(e)}")
 
 @router.get("", response_model=PaginatedDocuments)
@@ -263,10 +280,8 @@ async def delete_document(document_id: str, db: Session = Depends(get_db)):
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # Delete file from disk
-    file_path = UPLOAD_DIR / document.filename
-    if file_path.exists():
-        os.remove(file_path)
+    # Delete file using storage_service
+    await storage_service.delete_file(document.filename)
     
     # Delete from database
     DatabaseService.delete_document(db, document_id)
@@ -288,19 +303,22 @@ async def get_document_status(document_id: str, db: Session = Depends(get_db)):
 @router.get("/{document_id}/download")
 async def download_document(document_id: str, db: Session = Depends(get_db)):
     """Download or view a document"""
-    from fastapi.responses import FileResponse
+    from fastapi.responses import Response as FAResponse
     
     document = DatabaseService.get_document(db, document_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    file_path = UPLOAD_DIR / document.filename
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found on disk")
+    # Download content from storage_service
+    content = await storage_service.download_file(document.filename)
+    if not content:
+        raise HTTPException(status_code=404, detail="File not found")
     
-    return FileResponse(
-        path=file_path,
-        filename=document.original_name,
-        media_type=document.mime_type
+    return FAResponse(
+        content=content,
+        media_type=document.mime_type,
+        headers={
+            "Content-Disposition": f"attachment; filename={document.original_name}"
+        }
     )
 

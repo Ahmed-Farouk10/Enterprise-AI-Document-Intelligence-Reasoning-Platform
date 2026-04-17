@@ -1,61 +1,57 @@
+# Core Framework
 fastapi>=0.110.0
-uvicorn[standard]>=0.24.0
-python-multipart>=0.0.6
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
 pydantic>=2.10.5
 pydantic-settings>=2.5.0
-tenacity>=8.2.3
 
-# Document processing
-pytesseract>=0.3.10
-pdfplumber>=0.10.0
-pypdf>=3.17.0
-pillow>=10.1.0
-opencv-python-headless>=4.8.1.78
-python-docx>=0.8.11
-openpyxl>=3.1.2
-pandas>=2.0.3
+# LangGraph & LangChain
+langgraph>=0.2.50
+langchain>=0.3.10
+langchain-openai>=0.2.10
+langchain-groq>=0.2.1
+langchain-community>=0.3.10
 
-# ML/DL Essentials
-transformers>=4.40.0
-sentence-transformers>=3.0.0
-faiss-cpu>=1.7.4
-rank-bm25>=0.2.2
-accelerate>=0.24.0
-torch>=2.4.0 --index-url https://download.pytorch.org/whl/cpu
-numpy>=1.24.3,<2.0.0
+# Document Processing
+pdfplumber>=0.11.0
+pypdf>=5.1.0
+python-docx>=1.1.2
+openpyxl>=3.1.5
+pillow>=11.0.0
+pytesseract>=0.3.13
+pandas>=2.2.3
+
+# Vector Store (CPU only, no HuggingFace)
+lancedb>=0.17.0
+supabase>=2.11.0
 
 # Database
-sqlalchemy>=2.0.23
-alembic>=1.13.3
-psycopg2-binary>=2.9.9
-
-# Async processing
-celery>=5.3.4
-redis>=5.0.1
-
-# Utilities
-structlog>=24.1.0
-python-json-logger>=2.0.7
-numpy>=1.24.3,<2.0.0
-python-dotenv>=1.0.0
-instructor>=1.0.0
-openai>=1.14.0
-tavily-python>=0.3.0
-google-generativeai>=0.3.2 
+sqlalchemy>=2.0.36
+alembic>=1.14.0
+psycopg2-binary>=2.9.10
 aiosqlite>=0.20.0
 
+# Cache & Queue
+redis>=5.2.1
+celery>=5.4.0
 
-# Graph RAG Core (Simplified Phase 2)
-# Cognee and Neo4j removed in favor of pure RAG with LanceDB
-lancedb>=0.17.0
-networkx>=3.1.0
-huggingface-hub>=0.20.0
-fastapi-users>=14.0.1
-fastembed>=0.6.0
-greenlet>=3.0.0
-gunicorn>=21.2.0
+# LLM API Client (NO local models)
+openai>=1.58.1
+groq>=0.13.1
+
+# External Search
+tavily-python>=0.5.0
+duckduckgo-search>=6.4.1
+
+# Utilities
+python-dotenv>=1.0.1
+tenacity>=9.0.0
+structlog>=24.4.0
 slowapi>=0.1.9
-playwright>=1.41.0
-protego>=0.3.0
-redis>=5.0.0
-groq>=0.14.0
+networkx>=3.4.2
+
+# Testing
+pytest>=8.3.4
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0
+httpx>=0.28.1

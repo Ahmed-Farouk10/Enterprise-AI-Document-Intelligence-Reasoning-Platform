@@ -1,0 +1,120 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker-compose *)",
+      "Bash(findstr *)",
+      "Bash(timeout *)",
+      "Bash(type *)",
+      "Bash(setx *)",
+      "Bash(python *)",
+      "Bash(venv\\scripts\\activate)",
+      "Bash(pip install *)",
+      "Bash(curl *)",
+      "Bash(diagnose.cmd)",
+      "Bash(docker system *)",
+      "Bash(taskkill *)"
+    ]
+  },
+  "env": {
+    "OLLAMA_API_KEY": "REPLACE_WITH_OLLAMA_KEY",
+    "OPENROUTER_API_KEY": "REPLACE_WITH_OPENROUTER_KEY",
+    "GEMINI_API_KEY": "REPLACE_WITH_GEMINI_KEY",
+    "GROQ_API_KEY": "REPLACE_WITH_GROQ_KEY"
+  },
+  "modelProviders": {
+    "openai": [
+      {
+        "id": "gemini-3.1-pro-preview",
+        "name": "Gemini 3.1 Pro (Reasoning Mode)",
+        "envKey": "GEMINI_API_KEY",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "generationConfig": {
+          "contextWindowSize": 128000
+        }
+      },
+      {
+        "id": "gemini-3.1-flash-lite-preview",
+        "name": "Gemini 3.1 Flash Lite (High Speed)",
+        "envKey": "GEMINI_API_KEY",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "generationConfig": {
+          "contextWindowSize": 128000
+        }
+      },
+      {
+        "id": "qwen3-coder",
+        "name": "Qwen 3 Coder (Ollama)",
+        "envKey": "OLLAMA_API_KEY",
+        "baseUrl": "http://localhost:11434/v1",
+        "generationConfig": {
+          "contextWindowSize": 32768,
+          "samplingParams": {
+            "temperature": 0.7,
+            "max_tokens": 4096
+          }
+        }
+      },
+      {
+        "id": "mistralai/mistral-7b-instruct:free",
+        "name": "Mistral 7B v0.3 (Free - Tool Compatible)",
+        "envKey": "OPENROUTER_API_KEY",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "generationConfig": {
+          "contextWindowSize": 32768,
+          "samplingParams": {
+            "temperature": 0.7,
+            "max_tokens": 4096
+          }
+        }
+      },
+      {
+        "id": "nousresearch/hermes-3-llama-3.1-8b:free",
+        "name": "Hermes 3 - Llama 3.1 8B (Free - Agentic)",
+        "envKey": "OPENROUTER_API_KEY",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "generationConfig": {
+          "contextWindowSize": 131072,
+          "samplingParams": {
+            "temperature": 0.7,
+            "max_tokens": 4096
+          }
+        }
+      },
+      {
+        "id": "meta-llama/llama-3.1-8b-instruct:free",
+        "name": "Llama 3.1 8B (Free - Stable)",
+        "envKey": "OPENROUTER_API_KEY",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "generationConfig": {
+          "contextWindowSize": 131072,
+          "samplingParams": {
+            "temperature": 0.7,
+            "max_tokens": 4096
+          }
+        }
+      },
+      {
+        "id": "llama-3.3-70b-versatile",
+        "name": "Llama 3.3 70B (Groq - Ultra Fast)",
+        "envKey": "GROQ_API_KEY",
+        "baseUrl": "https://api.groq.com/openai/v1",
+        "generationConfig": {
+          "contextWindowSize": 128000,
+          "samplingParams": {
+            "temperature": 0.5,
+            "max_tokens": 8192
+          }
+        }
+      }
+    ]
+  },
+  "$version": 3,
+  "model": {
+    "name": "llama-3.3-70b-versatile"
+  },
+  "security": {
+    "auth": {
+      "selectedType": "openai"
+    }
+  }
+}

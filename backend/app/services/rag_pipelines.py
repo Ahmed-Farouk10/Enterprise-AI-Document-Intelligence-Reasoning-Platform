@@ -1,17 +1,21 @@
 
 import logging
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from app.models.ontologies import Contract, Invoice, CourseMaterial
 
 try:
     # import rag
-    from rag.infrastructure.llm.LLMGateway import LLMGateway
-    from rag.modules.pipelines import Task, run_pipeline
-    from rag.tasks.storage import add_data_points
+    from rag.infrastructure.llm.LLMGateway import LLMGateway # type: ignore
+    from rag.modules.pipelines import Task, run_pipeline # type: ignore
+    from rag.tasks.storage import add_data_points # type: ignore
     RAG_AVAILABLE = True
 except ImportError:
     RAG_AVAILABLE = False
+    rag = None # Fallback for name resolution
     logging.warning("Rag not available - professional pipelines disabled")
 
 from app.models.rag_models import (
@@ -33,7 +37,7 @@ logger = logging.getLogger(__name__)
 import uuid
 from app.core.rag_config import settings as rag_settings
 try:
-    from rag.modules.users.models import User
+    from rag.modules.users.models import User # type: ignore
 except ImportError:
     class User:
         def __init__(self, id):

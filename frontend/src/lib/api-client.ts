@@ -104,6 +104,25 @@ export class ApiClient {
     }
 
     /**
+     * PATCH request
+     */
+    static async patch<T>(
+        url: string,
+        data?: unknown,
+        config?: AxiosRequestConfig
+    ): Promise<ApiResponse<T>> {
+        try {
+            const response = await axiosInstance.patch<T>(url, data, config)
+            return {
+                success: true,
+                data: response.data,
+            }
+        } catch (error) {
+            return this.handleError(error)
+        }
+    }
+
+    /**
      * DELETE request
      */
     static async delete<T>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {

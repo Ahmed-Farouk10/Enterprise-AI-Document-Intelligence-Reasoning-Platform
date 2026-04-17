@@ -1,24 +1,24 @@
-# app/api/chat.py
+"""
+Optimized Chat API Routes
+Multi-document support with token efficiency and personality
+"""
 import asyncio
 import logging
-from app.core.logging_config import get_logger
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, Request, Response, status
+from datetime import datetime
+
+from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
-from app.services.llm_service import LLMService, AnalysisConfig, llm_service
 from app.db.database import get_db, SessionLocal
 from app.db.service import DatabaseService
-from app.services.cache import cache_service
+from app.services.llm_service import llm_service
+from app.services.vector_store import vector_store_service
+from app.services.cag_engine import cag_engine
 from app.core.rate_limiter import limiter
-
-from app.services.verification_service import get_verification_service
-import json
-from app.core.session_manager import session_manager
-from app.core.conversational_memory import conversational_memory
-from app.core.query_cache import query_cache
+from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -31,62 +31,16 @@ class ChatSessionCreate(BaseModel):
     document_ids: List[str] = Field(default_factory=list)
 
 
-class ChatSessionResponse(BaseModel):
-    id: str
-    title: str
-    created_at: str
-    updated_at: str
-    document_ids: List[str]
-    messages: List[Dict]
-
-
 class ChatMessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
 
 
-class ChatMessageResponse(BaseModel):
-    id: str
-    role: str
-    content: str
-    timestamp: str
-    document_context: Optional[Dict] = None
-    metadata: Optional[Dict] = None
-
-
-# --- Rag Enhanced Schemas ---
-
-class RagQuery(BaseModel):
-    question: str = Field(..., min_length=3, max_length=2000)
-    analysis_mode: str = Field(default="auto", description="entities, temporal, comparative, anomalies, summary, or auto")
-    include_graph_viz: bool = Field(default=False)
-    session_id: Optional[str] = None
-    document_id: Optional[str] = None
-
-
-class RagResponse(BaseModel):
-    answer: str
-    confidence: float
-    evidence_paths: List[List[Dict]]
-    entities: List[Dict]
-    analysis_mode: str
-    graph_stats: Optional[Dict] = None
-    processing_time_ms: int
-
-
-# ==================== DEPENDENCIES ====================
-
-def get_llm_service() -> LLMService:
-    """Dependency injection for LLM service"""
-    return llm_service
-
-
 # ==================== SESSION MANAGEMENT ====================
 
-@router.get("/sessions", response_model=List[ChatSessionResponse])
+@router.get("/sessions")
 async def get_sessions(db: Session = Depends(get_db)):
-    """Retrieve all chat sessions (lightweight list view)"""
+    """Retrieve all chat sessions"""
     sessions = DatabaseService.get_all_sessions(db)
-    
     return [
         {
             "id": s.id,
@@ -94,13 +48,13 @@ async def get_sessions(db: Session = Depends(get_db)):
             "created_at": s.created_at.isoformat(),
             "updated_at": s.updated_at.isoformat(),
             "document_ids": s.document_ids or [],
-            "messages": []  # Don't load messages in list view
+            "message_count": len(s.messages) if hasattr(s, 'messages') else 0
         }
         for s in sessions
     ]
 
 
-@router.post("/sessions", response_model=ChatSessionResponse)
+@router.post("/sessions")
 @limiter.limit("20/minute")
 async def create_session(
     request: Request,
@@ -108,13 +62,19 @@ async def create_session(
     session_data: ChatSessionCreate,
     db: Session = Depends(get_db)
 ):
-    """Create new analysis session"""
+    """Create new analysis session with multi-document support"""
     session = DatabaseService.create_chat_session(
         db=db,
         title=session_data.title,
         document_ids=session_data.document_ids
     )
-    
+
+    # Pre-compute CAG context for multi-document sets
+    if session_data.document_ids and len(session_data.document_ids) > 1:
+        asyncio.create_task(
+            cag_engine.precompute_context(session_data.document_ids)
+        )
+
     return {
         "id": session.id,
         "title": session.title,
@@ -125,27 +85,16 @@ async def create_session(
     }
 
 
-@router.get("/sessions/{session_id}", response_model=ChatSessionResponse)
-async def get_session(
-    session_id: str,
-    db: Session = Depends(get_db)
-):
-    """Get specific session with messages (cached)"""
-    
-    # Cache check
-    cached = cache_service.get_cached_session(session_id)
-    if cached:
-        logger.info("session_cache_hit", session_id=session_id)
-        return cached
-    
-    # DB fetch
+@router.get("/sessions/{session_id}")
+async def get_session(session_id: str, db: Session = Depends(get_db)):
+    """Get session with messages"""
     session = DatabaseService.get_chat_session(db, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     messages = DatabaseService.get_session_messages(db, session_id)
-    
-    response_data = {
+
+    return {
         "id": session.id,
         "title": session.title,
         "created_at": session.created_at.isoformat(),
@@ -161,671 +110,300 @@ async def get_session(
             for m in messages
         ]
     }
-    
-    # Cache for 30 min
-    cache_service.cache_session(session_id, response_data, ttl=1800)
-    return response_data
 
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, db: Session = Depends(get_db)):
-    """Delete session and invalidate cache"""
+    """Delete session"""
     success = DatabaseService.delete_chat_session(db, session_id)
     if not success:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    cache_service.invalidate_session(session_id)
-    logger.info("session_deleted", session_id=session_id)
-    
     return {"success": True, "message": "Session deleted"}
 
 
-# ==================== CORE CHAT ENDPOINTS ====================
+class ChatSessionUpdate(BaseModel):
+    document_ids: List[str]
 
-@router.post("/sessions/{session_id}/messages", response_model=ChatMessageResponse)
+
+@router.patch("/sessions/{session_id}")
+async def update_session(
+    session_id: str,
+    update_data: ChatSessionUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update session metadata (like document selections)"""
+    session = DatabaseService.get_chat_session(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session.document_ids = update_data.document_ids
+    db.commit()
+    db.refresh(session)
+    
+    # Trigger CAG pre-computation for the new set
+    if len(update_data.document_ids) > 1:
+        asyncio.create_task(
+            cag_engine.precompute_context(update_data.document_ids)
+        )
+        
+    return {
+        "success": True,
+        "document_ids": session.document_ids
+    }
+
+
+# ==================== MESSAGE PROCESSING ====================
+
+@router.post("/sessions/{session_id}/messages")
 @limiter.limit("30/minute")
 async def send_message(
     request: Request,
     response: Response,
     session_id: str,
     message_data: ChatMessageCreate,
-    db: Session = Depends(get_db),
-    llm: LLMService = Depends(get_llm_service)
+    db: Session = Depends(get_db)
 ):
     """
-    Main chat endpoint - document analysis with RAG.
-    Non-streaming for simple queries, handles complex analysis.
+    Send message with multi-document context and optimized token usage.
+    Non-streaming response.
     """
-    
-    # 1. Validate session
+    # Validate session
     session = DatabaseService.get_chat_session(db, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    # 2. Save user message
+
+    # Save user message
     user_msg = DatabaseService.create_message(
         db=db,
         session_id=session_id,
         role="user",
         content=message_data.content
     )
-    
-    # 3. Classify and configure analysis (MOVED UP)
-    intent = llm.classify_intent(message_data.content)
-    depth = llm.classify_depth(message_data.content)
-    scope = llm.detect_scope(message_data.content)
-    
-    # 4. Retrieve document context (Rag Graph Reasoning)
-    retrieval_data = await _get_retrieved_context(
-        message_data.content, 
-        depth=depth,
-        document_ids=session.document_ids or []
-    )
-    document_text = retrieval_data["full_context"]
-    
-    # 5. SAFETY GATE: No document = No generation
-    if not document_text or len(document_text.strip()) < 50:
-        return _create_error_response(
-            session_id=session_id,
-            content="⚠️ No relevant document context found. Please ensure you have uploaded a document.",
-            db=db
-        )
 
-    config = AnalysisConfig(
+    # Get conversation history
+    history = DatabaseService.get_session_messages(db, session_id)
+    conversation_history = [
+        {"role": m.role, "content": m.content}
+        for m in history[:-1]  # Exclude current user message
+    ]
+
+    # Classify intent (token-efficient)
+    intent, depth = llm_service.classify_intent(message_data.content)
+
+    # Retrieve multi-document context
+    context = await _retrieve_context(
+        message_data.content,
+        session.document_ids or [],
+        depth=depth
+    )
+
+    # Generate response with personality and optimization
+    response = llm_service.generate_with_context(
+        question=message_data.content,
+        context=context,
+        conversation_history=conversation_history[-6:] if conversation_history else None,
         intent=intent,
-        depth=depth,
-        scope=scope,
-        allow_external_search=False,  # Default safe mode
-        require_citations=True
+        num_documents=len(session.document_ids or []),
+        max_context_chars=3000  # Token optimization
     )
-    
-    # 6. Extract scoped context (Anti-hallucination filter)
-    scoped_context = llm.extract_scope_context(document_text, scope)
-    
-    # 7. Build system prompt (Single Source of Truth)
-    system_prompt = llm.build_system_prompt(config)
-    
-    # 8. Handle External Search Intent
-    if intent == LLMService.INTENT_SEARCH:
-        from app.services.search import search_service
-        search_results = search_service.search(message_data.content)
-        if search_results:
-            external_context = ""
-            for i, res in enumerate(search_results[:3]):
-                external_context += f"Source {i+1}: {res.get('title', 'Unknown')}\nSnippet: {res.get('snippet', '')}\n\n"
-            scoped_context += f"\n\n[EXTERNAL RESULTS from Web Search]:\n{external_context}"
 
-    # 9. Route by intent
-    try:
-        if intent == LLMService.INTENT_SCORING:
-            # Deterministic scoring - no streaming
-            answer = _handle_scoring_intent(llm, system_prompt, scoped_context, message_data.content)
-        elif intent == LLMService.INTENT_GAP_ANALYSIS:
-            # Structured gap analysis
-            answer = _handle_gap_analysis(llm, system_prompt, scoped_context, message_data.content)
-        else:
-            # Standard generation
-            answer = llm.generate(
-                system_prompt=system_prompt,
-                document_context=scoped_context,
-                question=message_data.content,
-                temperature=0.2
-            )
-            
-        # 9. Save and return
-        ai_msg = DatabaseService.create_message(
-            db=db,
-            session_id=session_id,
-            role="assistant",
-            content=answer,
-            document_context={"scope": scope, "intent": intent}
-        )
-        
-        return {
-            "id": ai_msg.id,
-            "role": "assistant",
-            "content": answer,
-            "timestamp": ai_msg.timestamp.isoformat(),
-            "document_context": {"retrieved_scope": scope, "intent": intent, "depth": depth},
-            "metadata": {"tokens_used": len(answer.split())}  # Approximate
+    # Check for errors
+    if response.startswith("Error:"):
+        ai_content = response
+    else:
+        ai_content = response
+
+    # Save AI response
+    ai_msg = DatabaseService.create_message(
+        db=db,
+        session_id=session_id,
+        role="assistant",
+        content=ai_content,
+        document_context={
+            "intent": intent,
+            "depth": depth,
+            "num_documents": len(session.document_ids or []),
+            "context_length": len(context)
         }
-        
-    except Exception as e:
-        logger.error("generation_error", session_id=session_id, error=str(e))
-        return _create_error_response(
-            session_id=session_id,
-            content=f"⚠️ Analysis failed: {str(e)}. Please try again.",
-            db=db
-        )
+    )
+
+    return {
+        "id": ai_msg.id,
+        "role": "assistant",
+        "content": ai_content,
+        "timestamp": ai_msg.timestamp.isoformat(),
+        "metadata": {
+            "intent": intent,
+            "depth": depth,
+            "num_documents": len(session.document_ids or []),
+            "tokens_estimated": len(ai_content.split())
+        }
+    }
 
 
 @router.post("/sessions/{session_id}/stream")
+@limiter.limit("30/minute")
 async def stream_message(
     request: Request,
+    response: Response,
     session_id: str,
     message_data: ChatMessageCreate,
-    db: Session = Depends(get_db),
-    llm: LLMService = Depends(get_llm_service)
+    db: Session = Depends(get_db)
 ):
     """
-    Streaming endpoint for real-time analysis feedback.
-    Used for: Long-form improvements, detailed evaluations.
+    Streaming endpoint with multi-document support.
+    Real-time token streaming with personality.
     """
-    
-    # Validate session
     session = DatabaseService.get_chat_session(db, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    # --- SESSION MANAGER INTEGRATION ---
-    from app.core.session_manager import session_manager
-    
-    # Get/Create Session Context
-    # We use the session_id from the URL as the consistent ID
-    sm_session = await session_manager.get_or_create_session(user_id="default_user", session_id=session_id)
-    history = sm_session.messages if sm_session else []
-    
-    # Save user message to context manager
-    await session_manager.update_session_context(
-        session_id=session_id,
-        message={"role": "user", "content": message_data.content},
-        document_ids=session.document_ids
-    )
 
-    # 3. Classify and configure analysis
-    intent = llm.classify_intent(message_data.content)
-    depth = llm.classify_depth(message_data.content)
-    scope = llm.detect_scope(message_data.content)
-    
-    # 4. Retrieve document context
-    retrieval_data = await _get_retrieved_context(
-        message_data.content, 
-        depth=depth,
-        document_ids=session.document_ids or []
-    )
-    document_text = retrieval_data["full_context"]
-    
-    # 5. SAFETY GATE
-    if not document_text or len(document_text.strip()) < 50:
-         # For streaming, we need to handle this inside the event generator or return early
-         # We'll handle it inside event_generator to provide a better UX
-         pass
+    # Save user message
+    DatabaseService.create_message(db, session_id, "user", message_data.content)
 
-    config = AnalysisConfig(
-        intent=intent,
-        depth=depth,
-        scope=scope,
-        require_citations=True
-    )
-    
-    scoped_context = llm.extract_scope_context(document_text, scope)
-    system_prompt = llm.build_system_prompt(config)
-    
-    # Inject History into System Prompt
-    if history:
-        history_text = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in history[-5:]])
-        system_prompt += f"\n\nCONVERSATION HISTORY:\n{history_text}\n"
+    # Get conversation history
+    history = DatabaseService.get_session_messages(db, session_id)
+    conversation_history = [
+        {"role": m.role, "content": m.content}
+        for m in history[:-1]
+    ]
 
     async def event_generator():
-        nonlocal scoped_context
         full_response = ""
-        document_context = {"scope": scope, "intent": intent}
-        
+
         try:
-            # SAFETY GATE CHECK
-            if not document_text or len(document_text.strip()) < 50:
-                yield _sse_event("status", "⚠️ No relevant document context found.")
-                yield _sse_event("error", "Please ensure you have uploaded a document and it has been processed.")
-                yield _sse_event("done", "No context available.")
+            # Check documents exist
+            if not session.document_ids:
+                yield _sse_event("status", "⚠️ No documents here yet! Upload some and I'll analyze them for you. 😊")
+                yield _sse_event("error", "Please upload documents before asking questions")
+                yield _sse_event("done", "")
                 return
 
-            # 0. SEMANTIC CACHE CHECK
-            # We check cache immediately to save compute
-            cached_result = await query_cache.get_semantic(message_data.content)
-            if cached_result:
-                yield _sse_event("status", "⚡ Semantic Cache Hit (Efficiency: 100%)")
-                yield _sse_event("reasoning", f"Found similar query (Similarity: {cached_result.get('similarity', 0):.2f})")
-                
-                # Stream cached content as if it were being generated (fast replay)
-                cached_content = cached_result['response']
-                chunk_size = 10
-                for i in range(0, len(cached_content), chunk_size):
-                    yield _sse_event("token", cached_content[i:i+chunk_size])
-                    await asyncio.sleep(0.01) # fast stream simulation
-                
-                yield _sse_event("done", cached_content, {"source": "semantic_cache"})
-                return
+            yield _sse_event("status", f"🔍 Analyzing {len(session.document_ids)} document(s)...")
 
-            # 1. RETRIEVE MEMORIES & HISTORY
-            # Get consistent history from Redis
-            history_list = await session_manager.get_conversation_history(session_id, limit=6)
-            
-            # Get relevant long-term memories
-            relevant_memories = await conversational_memory.retrieve_relevant_memories(
-                user_id=sm_session.user_id,
-                query=message_data.content
+            # Classify intent
+            intent, depth = llm_service.classify_intent(message_data.content)
+            yield _sse_event("status", f"💡 Got it! Analyzing with {depth} focus...")
+
+            # Retrieve context
+            context = await _retrieve_context(
+                message_data.content,
+                session.document_ids or [],
+                depth=depth
             )
-            
-            # Phase 1: Show ACTUAL retrieval method used
-            retrieval_method = retrieval_data.get("retrieval_method", "unknown")
-            
-            if retrieval_method == "hybrid":
-                yield _sse_event("status", f"🔍 Hybrid Mode: Vector Store + Graph | Depth: {depth}")
-                yield _sse_event("reasoning", "🕸️ Combining vector search with knowledge graph...")
-            elif retrieval_method == "rag":
-                yield _sse_event("status", f"🔍 Graph Mode: {intent} | Depth: {depth}")
-                yield _sse_event("reasoning", "🕸️ Traversing knowledge graph for evidence...")
-            else:  # vector_store or none
-                yield _sse_event("status", f"🔍 Vector Search Mode: {intent} | Depth: {depth}")
-                yield _sse_event("reasoning", "📚 Searching document embeddings for relevant context...")
-            
-            await asyncio.sleep(0.5) # UX for reasoning perception
-            
-            if retrieval_data.get("entities"):
-                entities = [e["name"] for e in retrieval_data["entities"]]
-                yield _sse_event("reasoning", f"✓ Found {len(entities)} relevant entities: {', '.join(entities[:3])}...")
-            
-            # Show memory usage if relevant
-            if relevant_memories:
-                 yield _sse_event("reasoning", f"🧠 Recalled {len(relevant_memories)} relevant facts from memory.")
 
-            # Phase 2: Handle External Search Intent
-            if intent == LLMService.INTENT_SEARCH:
-                yield _sse_event("status", "🌐 Triggering Web Search for additional context...")
-                from app.services.search import search_service
-                search_results = search_service.search(message_data.content)
-                if search_results:
-                    external_context = ""
-                    for i, res in enumerate(search_results[:3]):
-                        external_context += f"Source {i+1}: {res.get('title', 'Unknown')}\nSnippet: {res.get('snippet', '')}\n\n"
-                    scoped_context += f"\n\n[EXTERNAL RESULTS from Web Search]:\n{external_context}"
-                    yield _sse_event("reasoning", "🌍 Injected live web results into context.")
-                else:
-                    yield _sse_event("warning", "🌐 Web search yielded no results or timed out.")
+            if not context or len(context.strip()) < 50:
+                yield _sse_event("status", "⚠️ Hmm, the documents seem a bit empty. Let me know if you'd like to re-upload them!")
+                yield _sse_event("done", "")
+                return
 
-            # Stream generation
-            async for token in _async_stream_wrapper(
-                llm.generate_stream(system_prompt, scoped_context, message_data.content)
-            ):
-                if "[STREAM_START]" in token:
-                    continue
-                if "[STREAM_END]" in token:
-                    break
-                    
+            yield _sse_event("status", "✨ Great finds! Composing my thoughts...")
+
+            # Generate with streaming
+            stream_gen = llm_service.generate_with_context(
+                question=message_data.content,
+                context=context,
+                conversation_history=conversation_history[-6:] if conversation_history else None,
+                intent=intent,
+                num_documents=len(session.document_ids or []),
+                max_context_chars=3000,
+                stream=True
+            )
+
+            # Stream tokens
+            for token in stream_gen:
                 full_response += token
                 yield _sse_event("token", token)
-            
-            # TIER 3: Post-generation verification (hallucination detection)
-            yield _sse_event("status", "🔍 Verifying response against source context...")
-            
-            verification_service = get_verification_service()
-            verification_report = verification_service.verify_response(
-                response=full_response,
-                context=document_text,  # Use full context, not just scoped
-                include_evidence=False  # Don't send evidence to client (too verbose)
-            )
-            
-            # Log verification results
-            logger.info(
-                f"📊 Verification: {verification_report['overall_score']}% | "
-                f"Verified: {len(verification_report['verified_facts'])} | "
-                f"Hallucinated: {len(verification_report['hallucinated_facts'])}"
-            )
-            
-            # Add warning message if hallucinations detected
-            final_response = full_response
-            if verification_report['flagged']:
-                warning = verification_service.format_warning_message(verification_report)
-                if warning:
-                    final_response = f"{full_response}\n\n{warning}"
-                    # Send additional warning event
-                    yield _sse_event("warning", warning)
-            
-            # Update document context with verification info
-            document_context["verification"] = {
-                "score": verification_report['overall_score'],
-                "flagged": verification_report['flagged'],
-                "hallucinated_count": len(verification_report['hallucinated_facts'])
-            }
-            
-            # --- MEMORY & CACHE UPDATES ---
-            # 1. Update Session Context (Redis)
-            await session_manager.add_message(
-                session_id=session_id,
-                role="assistant",
-                content=final_response
-            )
-            
-            # 2. Update Semantic Cache (for future queries)
-            await query_cache.set_semantic(
-                query=message_data.content,
-                response=final_response
-            )
-            
-            # 3. Update Working Memory (Short-term context)
-            current_context = history_list + [{"role": "user", "content": message_data.content}, {"role": "assistant", "content": final_response}]
-            await conversational_memory.update_working_memory(
-                session_id=session_id,
-                user_id=sm_session.user_id,
-                context_items=current_context
-            )
 
-            # Completion
-            yield _sse_event("done", final_response, document_context)
-            
-            # Background save (SQL) - Legacy but kept for analytics
-            def _save_background():
+            if not full_response:
+                full_response = "Hmm, my brain went blank for a moment! Try asking again and I'll give you a better answer. 😅"
+
+            # Save response in background
+            def _save():
                 db_session = SessionLocal()
                 try:
                     DatabaseService.create_message(
-                        db_session, session_id, "assistant", full_response, document_context
+                        db_session,
+                        session_id,
+                        "assistant",
+                        full_response,
+                        {"intent": intent, "context_length": len(context)}
                     )
                 finally:
                     db_session.close()
 
-            asyncio.create_task(
-                asyncio.to_thread(_save_background)
-            )
-            
+            await asyncio.to_thread(_save)
+
+            yield _sse_event("done", full_response, {
+                "intent": intent,
+                "num_documents": len(session.document_ids or []),
+                "tokens_used": len(full_response.split())
+            })
+
         except Exception as e:
-            # Structlog requires keyword arguments for context
-            logger.error("stream_error", error=str(e), session_id=session_id)
-            yield _sse_event("error", str(e))
-    
+            logger.error("stream_error", error=str(e))
+            yield _sse_event("error", f"Oops! Something went wrong: {str(e)}")
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-# ==================== UTILITY FUNCTIONS ====================
+# ==================== HELPER FUNCTIONS ====================
 
-async def _get_retrieved_context(query: str, depth: str, document_ids: List[str] = []) -> Dict[str, Any]:
-    """
-    Retrieve context using LanceDB Vector Search.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        from app.services.vector_store import vector_store_service
-        
-        # Determine number of chunks to fetch based on explicit depth config
-        limit = 5
-        if depth == "deep": limit = 15
-        elif depth == "comprehensive": limit = 25
-        
-        doc_id = document_ids[0] if document_ids else None
-        
-        # Execute LanceDB Search
-        results = await vector_store_service.search(query=query, limit=limit, document_id=doc_id)
-        
-        if not results:
-             return {
-                "full_context": "No relevant context found.",
-                "document_name": "Vector Store Base",
-                "confidence": 0.0,
-                "entities": [],
-                "graph_evidence": [],
-                "retrieval_method": "vector_store"
-            }
-        
-        # Format the output into string context
-        context_texts = [res["text"] for res in results]
-        full_context = "\n---\n".join(context_texts)
-        
-        # We don't extract strict entities anymore natively here, 
-        # but structured entity metadata from extraction can be loaded if needed.
-        return {
-            "full_context": full_context,
-            "document_name": "RAG Document Base",
-            "confidence": 1.0 - (results[0]["distance"] if results else 0.5), # Inverse of LanceDB distance L2 metric estimate
-            "entities": [],
-            "graph_evidence": [],
-            "retrieval_method": "vector_store"
-        }
-        
-    except Exception as e:
-        logger.error(f"Vector search failed: {e}", exc_info=True)
-        return {
-            "full_context": "Error retrieving context. Please try again.",
-            "document_name": "Error",
-            "confidence": 0.0,
-            "entities": [],
-            "graph_evidence": [],
-            "retrieval_method": "error"
-        }
+async def _retrieve_context(
+    query: str,
+    document_ids: List[str],
+    depth: str = "shallow"
+) -> str:
+    """Retrieve context from multiple documents with token optimization"""
+    if not document_ids:
+        return ""
 
+    # Check CAG cache first (instant retrieval)
+    if len(document_ids) > 1:
+        cag_result = await cag_engine.get_cached_context(document_ids)
+        if cag_result:
+            return cag_result["full_context"]
 
-def _handle_scoring_intent(llm: LLMService, system_prompt: str, context: str, question: str) -> str:
-    """
-    Special handler for scoring intents - enforces deterministic calculation.
-    """
-    # First, check if document has measurable criteria
-    pre_check = llm.generate(
-        system_prompt="Does this document contain measurable/quantifiable criteria? Answer only YES or NO.",
-        document_context=context,
-        question="Can this be scored?",
-        max_new_tokens=10,
-        temperature=0.0
-    )
-    
-    if "no" in pre_check.lower():
-        return " **Scoring Not Possible**\n\nThe document does not contain sufficient quantitative or measurable criteria to generate a meaningful score. Please upload a document with clear metrics, requirements, or evaluation criteria."
-    
-    # Proceed with structured scoring
-    return llm.generate(
-        system_prompt=system_prompt,
-        document_context=context,
-        question=question,
-        temperature=0.1  # Low creativity for scoring
-    )
+    # Retrieve from vector store
+    limit = 15 if depth == "deep" else 8
+    all_chunks = []
 
-
-def _handle_gap_analysis(llm: LLMService, system_prompt: str, context: str, question: str) -> str:
-    """
-    Special handler for gap analysis - temporal verification.
-    """
-    # Extract dates first (could use NLP library in production)
-    date_extraction = llm.generate(
-        system_prompt="Extract all dates and date ranges from this document. List them in format: [Date/Range] - [Context]",
-        document_context=context,
-        question="List all temporal information",
-        max_new_tokens=512
-    )
-    
-    # Then analyze gaps
-    full_context = f"TEMPORAL DATA:\n{date_extraction}\n\nDOCUMENT:\n{context}"
-    
-    return llm.generate(
-        system_prompt=system_prompt,
-        document_context=full_context,
-        question=question
-    )
-
-
-def _create_error_response(session_id: str, content: str, db: Session) -> Dict:
-    """Helper for consistent error responses"""
-    # Save error as assistant message for continuity
-    try:
-        msg = DatabaseService.create_message(
-            db=db,
-            session_id=session_id,
-            role="assistant",
-            content=content
+    for doc_id in document_ids:
+        chunks = await vector_store_service.search(
+            query=query,
+            limit=limit,
+            document_id=doc_id
         )
-        return {
-            "id": msg.id,
-            "role": "assistant",
-            "content": content,
-            "timestamp": msg.timestamp.isoformat(),
-            "document_context": None,
-            "metadata": {"error": True}
-        }
-    except Exception:
-        return {
-            "id": "error",
-            "role": "assistant",
-            "content": content,
-            "timestamp": "",
-            "document_context": None,
-            "metadata": {"error": True}
-        }
+        all_chunks.extend(chunks)
 
+    if not all_chunks:
+        return ""
 
-# --- Rag Specialized Endpoints ---
+    # Sort by relevance
+    all_chunks.sort(key=lambda x: x.get("distance", 0))
 
-@router.post("/query", response_model=RagResponse)
-@limiter.limit("50/minute")
-async def rag_query(
-    request: Request,
-    query: RagQuery,
-    db: Session = Depends(get_db)
-):
-    """
-    Execute Rag knowledge graph query.
-    Primary analysis endpoint - replaces/augments standard RAG.
-    """
-    start_time = asyncio.get_event_loop().time()
-    
-    # Resolve document IDs
-    doc_ids = []
-    if query.session_id:
-        session = DatabaseService.get_chat_session(db, query.session_id)
-        if session:
-            doc_ids = session.document_ids or []
-    elif query.document_id:
-        doc_ids = [query.document_id]
-    
-    if not doc_ids:
-        raise HTTPException(status_code=400, detail="No documents specified.")
-    
-    # Map analysis mode
-    mode = _map_query_to_mode(query.question, query.analysis_mode)
-    
-    try:
-        # Execute Rag query
-        result: GraphQueryResult = await rag_engine.query(
-            question=query.question,
-            document_ids=doc_ids,
-            mode=mode,
-            include_subgraph=query.include_graph_viz
+    # Format context with document separators
+    context_texts = []
+    for chunk in all_chunks[:12]:  # Limit chunks for token efficiency
+        context_texts.append(chunk["text"])
+
+    full_context = "\n---\n".join(context_texts)
+
+    # Cache for multi-document sets
+    if len(document_ids) > 1:
+        await cag_engine.cache_context(
+            document_ids=document_ids,
+            full_context=full_context,
+            metadata={"query": query, "chunk_count": len(all_chunks)}
         )
-        
-        processing_time = int((asyncio.get_event_loop().time() - start_time) * 1000)
-        
-        # Save to history if session provided
-        if query.session_id:
-            DatabaseService.create_message(db, query.session_id, "user", query.question)
-            DatabaseService.create_message(
-                db, query.session_id, "assistant", result.answer,
-                {"confidence": result.confidence_score, "mode": mode.value}
-            )
-        
-        return RagResponse(
-            answer=result.answer,
-            confidence=result.confidence_score,
-            evidence_paths=result.evidence_paths,
-            entities=result.entities_involved,
-            analysis_mode=mode.value,
-            graph_stats=result.subgraph if query.include_graph_viz else None,
-            processing_time_ms=processing_time
-        )
-    except Exception as e:
-        logger.error(f"Rag query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
+    return full_context
 
 
-@router.get("/documents/{document_id}/gaps")
-async def analyze_temporal_gaps(document_id: str):
-    """Specialized temporal gap analysis using Rag graph."""
-    try:
-        result = await rag_engine.analyze_gaps(document_id)
-        return {
-            "document_id": document_id,
-            "analysis": result.answer,
-            "confidence": result.confidence_score,
-            "evidence": result.evidence_paths
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/documents/compare")
-async def compare_documents(source_id: str, target_id: str):
-    """Compare two documents using graph alignment."""
-    try:
-        result = await rag_engine.compare_to_standards(source_id, target_id)
-        return {
-            "source_id": source_id,
-            "target_id": target_id,
-            "alignment_score": result.confidence_score,
-            "analysis": result.answer,
-            "matched_entities": result.entities_involved
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def _sse_event(event_type: str, content: str, extra: Optional[Dict] = None) -> str:
-    """Format Server-Sent Event"""
+def _sse_event(event_type: str, data: Any, metadata: Optional[Dict] = None) -> str:
+    """Format SSE event"""
     import json
-    data = {"type": event_type, "content": content}
-    if extra:
-        data.update(extra)
-    return f"data: {json.dumps(data)}\n\n"
-
-
-async def _async_stream_wrapper(sync_generator):
-    """Convert sync generator to async for FastAPI streaming"""
-    loop = asyncio.get_event_loop()
-    iterator = iter(sync_generator)
-    
-    while True:
-        try:
-            token = await loop.run_in_executor(None, next, iterator)
-            yield token
-        except StopIteration:
-            break
-        except Exception as e:
-            logger.error("Stream wrapper error", error=str(e))
-            break
-
-
-# ==================== HEALTH & DEBUG ====================
-
-@router.get("/health")
-async def chat_health():
-    """Service health check"""
-    return {
-        "status": "online",
-        "llm_status": llm_service.get_service_health(),
-        "version": "2.0.0-enterprise"
-    }
-
-
-@router.post("/debug/analyze")
-async def debug_analyze(
-    document: str,
-    question: str,
-    llm: LLMService = Depends(get_llm_service)
-):
-    """
-    Debug endpoint to see analysis configuration without saving.
-    Useful for testing prompt engineering.
-    """
-    intent = llm.classify_intent(question)
-    depth = llm.classify_depth(question)
-    scope = llm.detect_scope(question)
-    
-    config = AnalysisConfig(intent=intent, depth=depth, scope=scope)
-    system_prompt = llm.build_system_prompt(config)
-    scoped_context = llm.extract_scope_context(document, scope)
-    
-    return {
-        "config": {
-            "intent": intent,
-            "depth": depth,
-            "scope": scope
-        },
-        "system_prompt": system_prompt,
-        "context_length": len(scoped_context),
-        "context_preview": scoped_context[:500] + "..." if len(scoped_context) > 500 else scoped_context
-    }
+    payload = {"type": event_type, "data": str(data)}
+    if metadata:
+        payload["metadata"] = metadata
+    return f"data: {json.dumps(payload)}\n\n"

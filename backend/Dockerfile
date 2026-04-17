@@ -1,70 +1,64 @@
+# ========================================
+# DocuCentric Backend Dockerfile
+# Optimized for Hugging Face Spaces
+# ========================================
+
+# Stage 1: Build dependencies
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Stage 2: Production image
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    redis-server \
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
-    tesseract-ocr-eng \
-    libtesseract-dev \
-    libgl1 \
-    libglib2.0-0 \
     poppler-utils \
-    build-essential \
     curl \
-    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app user and directories
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app/uploads /app/.cache && \
-    chown -R appuser:appuser /app
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
 
-# Set environment variables
-ENV HF_HOME=/app/.cache
-ENV TRANSFORMERS_CACHE=/app/.cache
-ENV PYTHONUNBUFFERED=1
+# Create non-root user (Hugging Face uses user with UID 1000)
+RUN useradd -m -u 1000 user
 
-# Add standard cache-busting ARG
-ARG CACHEBUST=1
-ENV FORCE_REBUILD_DEPS=$CACHEBUST
-
-# Copy requirements
-COPY requirements.txt .
-
-# Install dependencies in a single layer with CPU-specific torch
-# Using --prefer-binary to speed up build and avoid hung compilations
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir torch==2.4.0 --extra-index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir --prefer-binary -r requirements.txt
-
-# Ensure environment is healthy
-RUN python -c "print('Environment ready!')"
-
-# Install Playwright browsers and dependencies
-# Using --with-deps to install system dependencies (requires root, which we are)
-RUN playwright install --with-deps chromium
-
-# Pre-download Models to speed up HF Spaces startup
-# This bakes the Embedding Model into the Docker image
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
-
-# Fix permissions on downloaded cache so app user can access it
-RUN chown -R appuser:appuser /app/.cache
+# Create necessary directories and set permissions
+RUN mkdir -p /app/data /app/uploads && \
+    chown -R user:user /app
 
 # Copy application code
-ENV DEPLOY_TIMESTAMP=20240208_2041
-COPY --chown=appuser:appuser . .
+COPY --chown=user:user . .
 
-# Switch to non-root user
-USER appuser
-ENV PATH="/home/appuser/.local/bin:$PATH"
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
 
-# Expose port 7860
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:7860/health || exit 1
+
+# Expose port (Default for HF Spaces is 7860)
 EXPOSE 7860
 
-# Default command: Start Everything
-CMD redis-server --daemonize yes && \
-    celery -A app.workers.celery_app worker --loglevel=info --concurrency=1 -D && \
-    uvicorn "app.main:app" --host "0.0.0.0" --port "7860"
+# Switch to user
+USER user
+
+# Startup command - HF Spaces uses the PORT environment variable
+CMD uvicorn app.main:app --host 0.0.0.0 --port 7860 --workers 2

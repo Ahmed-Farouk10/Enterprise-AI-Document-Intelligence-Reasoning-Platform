@@ -14,7 +14,7 @@ from pydantic import Field, BaseModel, model_validator
 from datetime import datetime
 
 try:
-    from rag.infrastructure.engine import DataPoint
+    from rag.infrastructure.engine import DataPoint # type: ignore
 except ImportError:
     # Fallback for type checking if Rag not installed
     class DataPoint(BaseModel):
@@ -85,7 +85,7 @@ class Organization(DataPoint):
 
 class Person(DataPoint):
     """Person"""
-    name: str = Field(description="Name")
+    name: str = Field(default="Unknown", description="Name")
     title: Optional[str] = Field(default=None, description="Title")
     email: Optional[str] = Field(default=None, description="Email")
     phone: Optional[str] = Field(default=None, description="Phone")

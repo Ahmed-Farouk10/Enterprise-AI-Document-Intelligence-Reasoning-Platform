@@ -45,6 +45,15 @@ export const ChatAPI = {
     async deleteSession(sessionId: string) {
         return ApiClient.delete<void>(`/api/chat/sessions/${sessionId}`)
     },
+    
+    /**
+     * Update a chat session's document metadata (selection)
+     */
+    async updateSession(sessionId: string, documentIds: string[]) {
+        return ApiClient.patch<any>(`/api/chat/sessions/${sessionId}`, {
+            document_ids: documentIds
+        })
+    },
 
     /**
      * Stream chat response (for real-time responses)

@@ -2,28 +2,29 @@ import os
 import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from app.config import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# --- 1. PERSISTENT CONFIGURATION ---
-# We force the database to live in the writable cache folder provided by HF Spaces
-RAG_ROOT = "/app/.cache/rag_data"
-DB_DIR = os.path.join(RAG_ROOT, "databases")
+# --- 1. DATABASE CONFIGURATION ---
+# We prioritize the environment DATABASE_URL (Supabase/Postgres)
+# and fallback to a local persistent SQLite file for HF Spaces/local dev.
+SQLALCHEMY_DATABASE_URL = settings.database.DATABASE_URL
 
-# Ensure the directory exists immediately so we don't get 'unable to open database file'
-os.makedirs(DB_DIR, exist_ok=True)
-
-# Define the persistent file path
-# This ensures your chat history survives restarts
-DB_FILE = os.path.join(DB_DIR, "app_persistent_chat.db")
-SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE}"
+# Handle SQLite specific settings
+connect_args = {}
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+    # Ensure directory exists for local SQLite
+    db_path = SQLALCHEMY_DATABASE_URL.replace("sqlite:///", "")
+    if "/" in db_path:
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
 # --- 2. SQLALCHEMY SETUP ---
-# check_same_thread=False is required for SQLite with FastAPI
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, 
-    connect_args={"check_same_thread": False}
+    connect_args=connect_args
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -37,18 +38,14 @@ def get_db():
     finally:
         db.close()
 
-# --- 4. THE MISSING FUNCTION (RESTORED) ---
+# --- 4. STARTUP VERIFICATION ---
 def wait_for_db():
     """
     Verifies database accessibility on startup.
     This function is explicitly imported by main.py, so it must exist.
     """
     try:
-        logger.info(f"Checking database connection at {SQLALCHEMY_DATABASE_URL}...")
-        
-        # Double check directory exists
-        if not os.path.exists(DB_DIR):
-            os.makedirs(DB_DIR, exist_ok=True)
+        logger.info(f"Checking database connection at {SQLALCHEMY_DATABASE_URL.split('@')[-1] if '@' in SQLALCHEMY_DATABASE_URL else SQLALCHEMY_DATABASE_URL}...")
         
         # Test connection
         with engine.connect() as connection:
@@ -57,4 +54,6 @@ def wait_for_db():
         logger.info("✅ Database connection established.")
     except Exception as e:
         logger.error(f"❌ Database connection failed: {e}")
-        raise e
+        # In development, we might not want to crash immediately if DB is slow
+        if settings.ENVIRONMENT == "production":
+            raise e

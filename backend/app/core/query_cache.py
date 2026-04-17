@@ -6,7 +6,7 @@ import logging
 from functools import wraps
 
 from app.core.redis_adapter import redis_adapter
-from app.services.embeddings import SentenceTransformerEmbeddingEngine
+from app.services.embeddings import LocalEmbeddingEngine
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class QueryResultCache:
         self.default_ttl = timedelta(hours=1)
         # Initialize embedding engine
         try:
-           self.embedding_engine = SentenceTransformerEmbeddingEngine()
+           self.embedding_engine = LocalEmbeddingEngine()
         except Exception as e:
             logger.error(f"Failed to initialize embedding engine for cache: {e}")
             self.embedding_engine = None
