@@ -20,9 +20,13 @@ class StorageService:
                 logger.warning("SUPABASE_URL or KEY missing. Falling back to local storage.")
                 self.use_supabase = False
             else:
-                self.supabase: Client = create_client(url, key)
-                self.bucket_name = "documents"
-                logger.info(f"Initialized Supabase Storage (Bucket: {self.bucket_name})")
+                try:
+                    self.supabase: Client = create_client(url, key)
+                    self.bucket_name = "documents"
+                    logger.info(f"Initialized Supabase Storage (Bucket: {self.bucket_name})")
+                except Exception as e:
+                    logger.error(f"Failed to initialize Supabase Storage: {e}. Falling back to local storage.")
+                    self.use_supabase = False
 
     async def upload_file(self, file: BinaryIO, filename: str, content_type: str) -> str:
         """

@@ -16,7 +16,12 @@ class VectorStoreService:
         self.table_name = "document_chunks"
         
         if self.store_type == "supabase":
-            self._init_supabase()
+            try:
+                self._init_supabase()
+            except Exception as e:
+                logger.error(f"CRITICAL: Supabase initialization failed ({e}). Falling back to local LanceDB.")
+                self.store_type = "lancedb"
+                self._init_lancedb()
         else:
             self._init_lancedb()
 
@@ -36,8 +41,15 @@ class VectorStoreService:
                 pa.field("vector", pa.list_(pa.float32(), self.embedding_engine.dimension)),
                 pa.field("metadata", pa.string())
             ])
-            self.db.create_table(self.table_name, schema=schema)
-            logger.info(f"Created LanceDB table: {self.table_name}")
+            try:
+                self.table = self.db.create_table(self.table_name, schema=schema)
+                logger.info(f"Created LanceDB table: {self.table_name}")
+            except Exception as e:
+                if "already exists" in str(e).lower():
+                    self.table = self.db.open_table(self.table_name)
+                    logger.info(f"LanceDB table {self.table_name} was created by another process.")
+                else:
+                    raise e
         else:
             self.table = self.db.open_table(self.table_name)
             logger.info(f"Opened LanceDB table: {self.table_name}")

@@ -76,7 +76,7 @@ export default function DashboardPage() {
 
     const selectedDocumentNames = documents
         ?.filter(d => selectedDocs.includes(d.id))
-        .map(d => d.filename || d.original_name) || []
+        .map(d => d.filename || d.originalName) || []
 
     return (
         <>
@@ -155,7 +155,7 @@ export default function DashboardPage() {
                                                 />
                                                 <FileText className="size-4 text-muted-foreground" />
                                                 <span className="text-sm flex-1 truncate">
-                                                    {doc.filename || doc.original_name}
+                                                    {doc.filename || doc.originalName}
                                                 </span>
                                                 <span className="text-xs text-muted-foreground">
                                                     {doc.status}

@@ -29,6 +29,7 @@ export interface ChatMessage {
     documentContext?: {
         documentId: string
         documentName: string
+        numDocuments?: number
         relevantChunks?: string[]
     }
 }

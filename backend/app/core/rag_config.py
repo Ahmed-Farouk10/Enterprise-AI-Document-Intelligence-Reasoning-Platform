@@ -8,9 +8,9 @@ if not os.getenv("LLM_API_KEY"):
     # Use HF_TOKEN if available.
     if os.getenv("HF_TOKEN"):
         os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN")
-        print(f"🔑 LLM_API_KEY set to: {os.environ['LLM_API_KEY'][:10]}...")
+        print(f"LLM_API_KEY set to: {os.environ['LLM_API_KEY'][:10]}...")
     else:
-        print("⚠️ No LLM_API_KEY or HF_TOKEN found. Rag may fail LLM connection tests.")
+        print("No LLM_API_KEY or HF_TOKEN found. Rag may fail LLM connection tests.")
 
 # --- FAILSAFE: Force Clean Env Vars ---
 # Removed aggressive overrides to allow custom OpenRouter/Gemini configurations
@@ -23,11 +23,11 @@ try:
 except ImportError:
     # If import fails (e.g. running script directly), define basic fallback
     # But ideally, this should never happen in the app context
-    print("⚠️ WARNING: Could not import storage_setup. Using fallback defaults.")
+    print("WARNING: Could not import storage_setup. Using fallback defaults.")
     RAG_ROOT = "/app/.cache/rag_data"
 
 _rag_root = RAG_ROOT
-print(f"📦 Rag Config inherits Root: {_rag_root}")
+print(f"Rag Config inherits Root: {_rag_root}")
 
 # Ensure directory exists (redundant but safe)
 os.makedirs(_rag_root, exist_ok=True)
@@ -42,7 +42,7 @@ if os.getenv("HF_TOKEN") and not os.getenv("RAG_LLM_PROVIDER") and not os.getenv
     os.environ["RAG_LLM_PROVIDER"] = "huggingface"
     os.environ["RAG_LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct" 
     os.environ["RAG_SKIP_LLM_TEST"] = "true"
-    print("⚙️ Rag: Defaulting to HuggingFace Provider on Spaces")
+    print("Rag: Defaulting to HuggingFace Provider on Spaces")
 # ---------------------------------------------------------
 
 class RagSettings(BaseSettings):

@@ -62,4 +62,4 @@ class LayoutParser:
         }
 
 # Singleton
-layout_parser = LayoutParser()
+layout_service = LayoutParser()

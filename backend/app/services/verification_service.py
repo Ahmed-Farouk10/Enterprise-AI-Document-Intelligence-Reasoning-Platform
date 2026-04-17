@@ -210,11 +210,14 @@ class FactVerificationService:
 
 
 # Singleton instance
+verification_service = FactVerificationService()
+
+# Legacy lazy getter (used by langgraph_workflows.py)
 _verification_service = None
 
 def get_verification_service() -> FactVerificationService:
     """Get or create the global verification service instance"""
     global _verification_service
     if _verification_service is None:
-        _verification_service = FactVerificationService()
+        _verification_service = verification_service
     return _verification_service
