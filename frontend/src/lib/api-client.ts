@@ -1,7 +1,19 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios'
 import { ApiResponse } from '@/types'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+export let API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
+// Auto-fix common Hugging Face Space misconfiguration (UI URL vs API URL)
+if (API_BASE_URL.includes('huggingface.co/spaces/')) {
+    const parts = API_BASE_URL.split('huggingface.co/spaces/')[1].split('/')
+    if (parts.length >= 2) {
+        const owner = parts[0].toLowerCase().replace(/_/g, '-')
+        const name = parts[1].toLowerCase().replace(/_/g, '-')
+        API_BASE_URL = `https://${owner}-${name}.hf.space`
+        console.log(`🔧 Auto-fixed API URL to: ${API_BASE_URL}`)
+    }
+}
+
 
 /**
  * Axios instance with default configuration

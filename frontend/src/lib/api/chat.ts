@@ -1,4 +1,4 @@
-import { ApiClient } from '../api-client'
+import { ApiClient, API_BASE_URL } from '../api-client'
 import { ChatMessage, ChatSession } from '@/types'
 
 /**
@@ -63,7 +63,7 @@ export const ChatAPI = {
         content: string,
         onChunk: (chunk: any) => void
     ): Promise<void> {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const API_URL = API_BASE_URL;
 
         try {
             const response = await fetch(`${API_URL}/api/chat/sessions/${sessionId}/stream`, {
