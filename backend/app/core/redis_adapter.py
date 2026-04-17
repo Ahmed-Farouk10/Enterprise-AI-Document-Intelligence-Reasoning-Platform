@@ -29,34 +29,25 @@ class RedisCacheAdapter:
         socket_connect_timeout: float = 5.0,
         retry_on_timeout: bool = True
     ):
-        pool_kwargs = {
-            "host": host,
-            "port": port,
-            "db": db,
-            "password": password,
-            "max_connections": max_connections,
-            "socket_timeout": socket_timeout,
-            "socket_connect_timeout": socket_connect_timeout,
-            "retry_on_timeout": retry_on_timeout,
-            "decode_responses": False
-        }
-        
-        # Only add SSL if enabled, to avoid 'unexpected keyword argument' error
-        if ssl:
-            pool_kwargs["ssl"] = True
-            
-        self.connection_pool = redis.ConnectionPool(**pool_kwargs)
+        self.redis_url = host  # In our case, 'host' is passed the full REDIS_URL from settings
+        self.max_connections = max_connections
+        self.socket_timeout = socket_timeout
         self._client: Optional[redis.Redis] = None
     
     async def connect(self):
-        """Initialize Redis connection."""
-        self._client = redis.Redis(connection_pool=self.connection_pool)
+        """Initialize Redis connection using the provided URL."""
         try:
+            self._client = redis.Redis.from_url(
+                self.redis_url,
+                max_connections=self.max_connections,
+                socket_timeout=self.socket_timeout,
+                decode_responses=False
+            )
             await self._client.ping()
-            logger.info("Redis connection established")
+            logger.info("Redis connection established via URL")
         except Exception as e:
             logger.error(f"Redis connection failed: {e}")
-            # Don't raise here to allow app startup even if Redis is down (graceful degradation)
+            self._client = None  # Ensure it stays None if connection fails
             
     async def disconnect(self):
         """Close Redis connection."""

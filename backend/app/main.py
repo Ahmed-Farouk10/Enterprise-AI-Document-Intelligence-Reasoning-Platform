@@ -104,9 +104,13 @@ allowed_origins = [
     "http://localhost:3001",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
-    "https://ahmed-farouk10-enterprise-ai-document-intelligence.vercel.app", # Vercel production
-    "https://ahmedaayman-eadrip.hf.space", # HF Space origin
+    "https://ahmed-farouk10-enterprise-ai-document-intelligence.vercel.app",
+    "https://ahmedaayman-eadrip.hf.space",
 ]
+
+# Allow all Vercel subdomains (previews, branches, etc.)
+allowed_origin_regex = r"https://.*\.vercel\.app"
+
 
 # Support for dynamic HF Space URLs
 hf_space_id = os.getenv("SPACE_ID")
@@ -122,6 +126,7 @@ if hf_space_id:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
