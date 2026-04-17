@@ -1,6 +1,7 @@
 import os
 import logging
-from sqlalchemy import create_engine
+import time
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from app.config import settings
 
@@ -24,7 +25,9 @@ if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
 # --- 2. SQLALCHEMY SETUP ---
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, 
-    connect_args=connect_args
+    connect_args=connect_args,
+    pool_pre_ping=True,
+    pool_recycle=300
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -39,21 +42,27 @@ def get_db():
         db.close()
 
 # --- 4. STARTUP VERIFICATION ---
-def wait_for_db():
+def wait_for_db(max_retries: int = 3, delay: int = 2):
     """
-    Verifies database accessibility on startup.
-    This function is explicitly imported by main.py, so it must exist.
+    Verifies database accessibility on startup with retries.
+    Does not crash the app if DB is unavailable to allow graceful degradation.
     """
-    try:
-        logger.info(f"Checking database connection at {SQLALCHEMY_DATABASE_URL.split('@')[-1] if '@' in SQLALCHEMY_DATABASE_URL else SQLALCHEMY_DATABASE_URL}...")
-        
-        # Test connection
-        with engine.connect() as connection:
-            pass
+    retry_count = 0
+    while retry_count < max_retries:
+        try:
+            logger.info(f"Checking database connection (Attempt {retry_count + 1}/{max_retries})...")
             
-        logger.info("✅ Database connection established.")
-    except Exception as e:
-        logger.error(f"❌ Database connection failed: {e}")
-        # In development, we might not want to crash immediately if DB is slow
-        if settings.ENVIRONMENT == "production":
-            raise e
+            # Test connection
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            
+            logger.info("✅ Database connection established.")
+            return True
+        except Exception as e:
+            retry_count += 1
+            logger.warning(f"⚠️ Database connection attempt {retry_count} failed: {e}")
+            if retry_count < max_retries:
+                time.sleep(delay)
+            else:
+                logger.error("❌ All database connection attempts failed. App will start but DB features may fail.")
+    return False

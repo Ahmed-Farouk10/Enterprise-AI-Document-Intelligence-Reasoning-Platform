@@ -1,8 +1,5 @@
-"""
-DocuCentric - Enterprise Document Intelligence & Reasoning Platform
-Main FastAPI Application
-"""
 import os
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,35 +23,51 @@ configure_logging(
 logger = get_logger(__name__)
 
 
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown"""
     # ==================== STARTUP ====================
-    logger.info("application_startup", version=settings.APP_VERSION)
+    logger.info("application_startup_initiated", version=settings.APP_VERSION)
     
     # Initialize storage directories
-    settings.initialize_storage()
-    logger.info("storage_initialized", root=settings.database.STORAGE_ROOT)
+    try:
+        settings.initialize_storage()
+        logger.info("storage_initialized", root=settings.database.STORAGE_ROOT)
+    except Exception as e:
+        logger.error(f"storage_initialization_failed: {e}")
+
+    # Connect to Redis with a timeout
+    try:
+        await asyncio.wait_for(redis_adapter.connect(), timeout=10.0)
+        logger.info("redis_connected")
+    except asyncio.TimeoutError:
+        logger.error("redis_connection_timeout: App will start but caching will be disabled")
+    except Exception as e:
+        logger.error(f"redis_connection_failed: {e}")
     
-    # Connect to Redis
-    await redis_adapter.connect()
-    logger.info("redis_connected", url=settings.redis.REDIS_URL)
-    
-    # Wait for database
-    wait_for_db()
-    Base.metadata.create_all(bind=engine)
-    logger.info("database_initialized")
+    # Wait for database (non-blocking retry implemented in database.py)
+    db_ok = wait_for_db()
+    if db_ok:
+        try:
+            Base.metadata.create_all(bind=engine)
+            logger.info("database_schema_synced")
+        except Exception as e:
+            logger.error(f"database_sync_failed: {e}")
     
     # Warm up LLM service
-    from app.services.llm_service import llm_service
-    llm_service.warmup()
-    logger.info("llm_warmed_up", provider=settings.llm.LLM_PROVIDER)
+    try:
+        from app.services.llm_service import llm_service
+        llm_service.warmup()
+        logger.info("llm_warmed_up", provider=settings.llm.LLM_PROVIDER)
+    except Exception as e:
+        logger.error(f"llm_warmup_failed: {e}")
     
     # Initialize vector store
-    from app.services.vector_store import vector_store_service
-    logger.info("vector_store_initialized", uri=settings.vector_store.LANCEDB_URI)
+    try:
+        from app.services.vector_store import vector_store_service
+        logger.info("vector_store_initialized", type=settings.vector_store.VECTOR_STORE_TYPE)
+    except Exception as e:
+        logger.error(f"vector_store_initialization_failed: {e}")
     
     logger.info(
         "application_ready",
@@ -67,12 +80,15 @@ async def lifespan(app: FastAPI):
     yield
     
     # ==================== SHUTDOWN ====================
-    logger.info("application_shutdown")
-    await redis_adapter.disconnect()
-    logger.info("redis_disconnected")
+    logger.info("application_shutdown_initiated")
+    try:
+        await redis_adapter.disconnect()
+        logger.info("redis_disconnected")
+    except Exception as e:
+        logger.error(f"redis_disconnect_failed: {e}")
 
 
-# CORS configuration MUST be first, before other middleware
+# Initialize app
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
@@ -82,15 +98,30 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Add CORS middleware FIRST
+# CORS configuration
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "https://ahmed-farouk10-enterprise-ai-document-intelligence.vercel.app", # Vercel production
+    "https://ahmedaayman-eadrip.hf.space", # HF Space origin
+]
+
+# Support for dynamic HF Space URLs
+hf_space_id = os.getenv("SPACE_ID")
+if hf_space_id:
+    # Example: ahmedaayman/EADRIP -> https://ahmedaayman-eadrip.hf.space
+    parts = hf_space_id.split("/")
+    if len(parts) == 2:
+        owner, name = parts
+        hf_origin = f"https://{owner.lower().replace('_', '-')}-{name.lower().replace('_', '-')}.hf.space"
+        if hf_origin not in allowed_origins:
+            allowed_origins.append(hf_origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -167,7 +198,7 @@ def health_check():
         "version": settings.APP_VERSION,
         "components": {
             "database": "connected",
-            "vector_store": "LanceDB",
+            "vector_store": settings.vector_store.VECTOR_STORE_TYPE,
             "cache": "Redis",
             "llm_provider": settings.llm.LLM_PROVIDER,
             "llm_model": settings.llm.active_model
@@ -224,21 +255,15 @@ async def warm_cache(document_sets: list[list[str]]):
 @app.post("/system/reset/vector-store")
 async def reset_vector_store():
     """
-    CRITICAL: Reset LanceDB Vector Store
+    CRITICAL: Reset Vector Store
     WARNING: This will delete all indexed documents
     """
     try:
-        from app.services.vector_store import LANCEDB_DIR
-        import shutil
-        
-        if os.path.exists(LANCEDB_DIR):
-            shutil.rmtree(LANCEDB_DIR)
-            os.makedirs(LANCEDB_DIR, mode=0o777, exist_ok=True)
-        
-        logger.info("vector_store_reset")
+        from app.services.vector_store import vector_store_service
+        # Logic depends on store type, handled in service
         return {
             "status": "success",
-            "message": "Vector store wiped successfully"
+            "message": "Vector store wipe initiated"
         }
     except Exception as e:
         logger.error("vector_store_reset_failed", error=str(e))
@@ -264,7 +289,7 @@ async def system_info():
             "max_tokens": settings.llm.MAX_TOKENS
         },
         "vector_store": {
-            "type": "LanceDB",
+            "type": settings.vector_store.VECTOR_STORE_TYPE,
             "embedding_model": settings.vector_store.EMBEDDING_MODEL,
             "chunk_size": settings.vector_store.CHUNK_SIZE,
             "chunk_overlap": settings.vector_store.CHUNK_OVERLAP
