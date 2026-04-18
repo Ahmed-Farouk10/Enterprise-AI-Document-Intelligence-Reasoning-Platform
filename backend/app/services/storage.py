@@ -14,10 +14,11 @@ class StorageService:
         self.local_upload_dir.mkdir(parents=True, exist_ok=True)
         
         if self.use_supabase:
-            url = settings.database.SUPABASE_URL
-            key = settings.database.SUPABASE_SERVICE_ROLE_KEY
-            if not url or not key:
-                logger.warning("SUPABASE_URL or KEY missing. Falling back to local storage.")
+            url = (settings.database.SUPABASE_URL or "").strip().rstrip('/')
+            key = (settings.database.SUPABASE_SERVICE_ROLE_KEY or "").strip()
+            if not url or not key or "your-project" in url:
+                logger.warning("SUPABASE_URL or KEY missing or invalid. Falling back to local storage.")
+
                 self.use_supabase = False
             else:
                 try:

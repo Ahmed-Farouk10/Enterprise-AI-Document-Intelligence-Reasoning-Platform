@@ -5,22 +5,23 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 
-from app.config import settings
-from app.routes import documents, chat, knowledge_graph
-from app.db.database import Base, engine, wait_for_db
 from app.core.logging_config import configure_logging, get_logger
-from app.core.rate_limiter import limiter, rate_limit_exceeded_handler
-from app.core.redis_adapter import redis_adapter
-from app.core.session_manager import session_manager
-from app.core.query_cache import query_cache
+from app.config import settings
 
-# Initialize structured logging
+# Initialize structured logging IMMEDIATELY
 configure_logging(
     log_level=settings.logging.LOG_LEVEL,
     json_output=settings.logging.JSON_LOGS
 )
 
 logger = get_logger(__name__)
+
+from app.routes import documents, chat, knowledge_graph
+from app.db.database import Base, engine, wait_for_db
+from app.core.rate_limiter import limiter, rate_limit_exceeded_handler
+from app.core.redis_adapter import redis_adapter
+from app.core.session_manager import session_manager
+from app.core.query_cache import query_cache
 
 
 @asynccontextmanager
@@ -52,7 +53,8 @@ async def lifespan(app: FastAPI):
             Base.metadata.create_all(bind=engine)
             logger.info("database_schema_synced")
         except Exception as e:
-            logger.error(f"database_sync_failed: {e}")
+            logger.warning(f"database_sync_warning (can be ignored if using Supabase): {e}")
+
     
     # Warm up LLM service
     try:
@@ -133,7 +135,34 @@ app.add_middleware(
 )
 
 
-# ==================== MIDDLEWARE ====================
+# ==================== MIDDLEWARE & ERRORS ====================
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler to capture and log ALL errors"""
+    import traceback
+    error_detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    
+    logger.error(
+        "unhandled_exception",
+        path=request.url.path,
+        method=request.method,
+        error=str(exc),
+        traceback=error_detail
+    )
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": {
+                "message": "An internal server error occurred",
+                "detail": str(exc),
+                "type": type(exc).__name__
+            }
+        }
+    )
 
 # Initialize rate limiter
 app.state.limiter = limiter
@@ -211,21 +240,9 @@ def health_check():
     }
 
 
-@app.get("/api/sessions")
-async def list_sessions(user_id: str = "default_user"):
-    """List all active sessions for user"""
-    return await session_manager.list_user_sessions(user_id)
-
-
-@app.post("/api/sessions/{session_id}/clear")
-async def clear_session(session_id: str):
-    """Clear session conversation history"""
-    success = await session_manager.clear_session(session_id)
-    return {"success": success}
-
-
 @app.get("/api/cache/stats")
 async def cache_stats():
+
     """Get comprehensive cache statistics"""
     from app.services.cag_engine import cag_engine
     

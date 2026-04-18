@@ -5,11 +5,16 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-7e56c2.svg)](https://langchain-ai.github.io/langgraph/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+## 🌐 Live Platform
+**Public URL:** [https://docucentric.vercel.app/](https://docucentric.vercel.app/)
+
 ## Overview
 
 DocuCentric is a next-generation **Document Intelligence and Reasoning Platform** that combines **LangGraph workflows** with **Cache-Augmented Generation (CAG)** to deliver fast, accurate, and fact-grounded document analysis.
 
-Unlike traditional RAG systems that hallucinate, DocuCentric enforces **strict fact-grounding** - every claim must reference actual document content, with built-in hallucination detection and verification.
+For a detailed technical journey of the project's evolution, see [PROJECT_HISTORY.md](./PROJECT_HISTORY.md).
+
+Unlike traditional RAG systems that hallucinate, DocuCentric enforces **strict fact-grounding** - every claim must reference actual document context, with built-in hallucination detection and verification.
 
 ### Key Features
 
@@ -413,4 +418,6 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) for deta
 
 ---
 
-**Ready to deploy. No more monkey patching. No more hallucination.** 🚀
+---
+
+**Production Ready. Zero Hallucination. Low Latency Intelligence.** 🚀

@@ -23,12 +23,24 @@ if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
 # --- 2. SQLALCHEMY SETUP ---
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, 
-    connect_args=connect_args,
-    pool_pre_ping=True,
-    pool_recycle=300
-)
+try:
+    # Log some metadata about the URL (safely)
+    db_scheme = SQLALCHEMY_DATABASE_URL.split(":")[0] if ":" in SQLALCHEMY_DATABASE_URL else "unknown"
+    url_len = len(SQLALCHEMY_DATABASE_URL)
+    logger.info(f"🚀 Initializing database engine with scheme: {db_scheme} (Length: {url_len})")
+    
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL, 
+        connect_args=connect_args,
+        pool_pre_ping=True,
+        pool_recycle=300
+    )
+except Exception as e:
+    logger.error(f"❌ CRITICAL: Failed to create database engine: {e}")
+    # Fallback to in-memory sqlite to prevent hard crash if possible, or re-raise
+    # For now, we re-raise to see the full stack in logs but with our extra info above
+    raise
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

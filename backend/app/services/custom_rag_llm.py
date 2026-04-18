@@ -4,6 +4,8 @@ import os
 from typing import Type, TypeVar, Any, Dict, List, Optional
 from pydantic import BaseModel
 from app.services.llm_service import llm_service
+from app.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +18,10 @@ class CustomRagLLMEngine:
     Implements the protocol expected by Rag's LLMGateway.
     """
     def __init__(self):
-        self.provider = (os.getenv("LLM_PROVIDER") or os.getenv("RAG_LLM_PROVIDER") or "huggingface").lower()
+        self.provider = settings.llm.LLM_PROVIDER.lower()
         self.model = getattr(llm_service, "model_name", "unknown")
-        self.api_key = os.getenv("LLM_API_KEY", "local")
+        self.api_key = settings.llm.active_api_key
+
 
     async def acreate_structured_output(
         self, 

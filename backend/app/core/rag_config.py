@@ -1,115 +1,56 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
 import os
+from app.config import settings
 
-# --- CRITICAL: SET LLM_API_KEY BEFORE RAG IMPORTS ---
-# Rag checks for this during module import, so it MUST be set first
-if not os.getenv("LLM_API_KEY"):
-    # Use HF_TOKEN if available.
-    if os.getenv("HF_TOKEN"):
-        os.environ["LLM_API_KEY"] = os.getenv("HF_TOKEN")
-        print(f"LLM_API_KEY set to: {os.environ['LLM_API_KEY'][:10]}...")
-    else:
-        print("No LLM_API_KEY or HF_TOKEN found. Rag may fail LLM connection tests.")
+# --- CRITICAL: SYNC RAG ENV VARS WITH CENTRAL SETTINGS ---
+# This ensures that Rag's internal logic respects our LLM_PROVIDER choice (OpenRouter)
+# and Database choice (Supabase/PostgreSQL)
 
-# --- FAILSAFE: Force Clean Env Vars ---
-# Removed aggressive overrides to allow custom OpenRouter/Gemini configurations
-# --------------------------------------
-
-# --- CRITICAL: INHERIT FROM CENTRAL SETUP ---
-# We reuse the logic from app/rag_setup.py to ensure consistency
-try:
-    from app.storage_setup import STORAGE_ROOT as RAG_ROOT, verify_storage_setup
-except ImportError:
-    # If import fails (e.g. running script directly), define basic fallback
-    # But ideally, this should never happen in the app context
-    print("WARNING: Could not import storage_setup. Using fallback defaults.")
-    RAG_ROOT = "/app/.cache/rag_data"
-
+# 1. Coordinate Storage Root
+from app.storage_setup import STORAGE_ROOT as RAG_ROOT
 _rag_root = RAG_ROOT
-print(f"Rag Config inherits Root: {_rag_root}")
 
-# Ensure directory exists (redundant but safe)
-os.makedirs(_rag_root, exist_ok=True)
-
-# Set env vars for Rag (Reinforcing what setup already did)
+# 2. Synchronize environment variables for internal RAG modules
 os.environ["RAG_ROOT_DIR"] = _rag_root
-os.environ["RAG_DATABASE_URL"] = f"sqlite:///{_rag_root}/databases/rag_db.db"
+os.environ["RAG_DATABASE_URL"] = settings.database.DATABASE_URL
+os.environ["RAG_LLM_PROVIDER"] = settings.llm.LLM_PROVIDER
+os.environ["RAG_LLM_MODEL"] = settings.llm.active_model
+os.environ["LLM_PROVIDER"] = settings.llm.LLM_PROVIDER
+os.environ["LLM_MODEL"] = settings.llm.active_model
+os.environ["LLM_API_KEY"] = settings.llm.active_api_key or ""
 
-# CRITICAL FIX: Only set default provider if none exists
-if os.getenv("HF_TOKEN") and not os.getenv("RAG_LLM_PROVIDER") and not os.getenv("LLM_PROVIDER"):
-    # Force HuggingFace Provider for Rag only as a last resort fallback
-    os.environ["RAG_LLM_PROVIDER"] = "huggingface"
-    os.environ["RAG_LLM_MODEL"] = "Qwen/Qwen2.5-72B-Instruct" 
-    os.environ["RAG_SKIP_LLM_TEST"] = "true"
-    print("Rag: Defaulting to HuggingFace Provider on Spaces")
-# ---------------------------------------------------------
+# Also set standard keys for fallbacks
+if settings.llm.GROQ_API_KEY:
+    os.environ["GROQ_API_KEY"] = settings.llm.GROQ_API_KEY
+if settings.llm.OPENROUTER_API_KEY:
+    os.environ["OPENROUTER_API_KEY"] = settings.llm.OPENROUTER_API_KEY
 
-class RagSettings(BaseSettings):
-    # Graph Database (Neo4j)
-    RAG_GRAPH_DB_TYPE: str = "neo4j"
-    RAG_GRAPH_URL: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "changeme123")
+# 3. Vector Store
+os.environ["RAG_VECTOR_DB_TYPE"] = settings.vector_store.VECTOR_STORE_TYPE
+os.environ["RAG_VECTOR_DB_URL"] = settings.vector_store.LANCEDB_URI # Or supabase URI if applicable
 
-    # Default User for Rag operations
-    DEFAULT_USER_ID: str = os.getenv("RAG_DEFAULT_USER_ID", "5e5ab0cc-892c-4c79-a8f7-2938f649efcd")
-    RAG_API_KEY: Optional[str] = os.getenv("RAG_API_KEY")
+# 4. Standardize Embedding Provider
+os.environ["EMBEDDING_PROVIDER"] = settings.vector_store.EMBEDDING_MODEL
+os.environ["RAG_EMBEDDING_PROVIDER"] = "fastembed" # Standard for our setup
 
-    # Vector Store (Local LanceDB for spaces)
-    RAG_VECTOR_DB_TYPE: str = "lancedb"
-    RAG_VECTOR_DB_URL: str = os.getenv("LANCEDB_URI", "/app/rag_data/lancedb")
-    # RAG_VECTOR_DB_KEY: Not needed for LanceDB
-
-    # LLM & Embedding (Prioritize system LLM_PROVIDER, default to groq for local speed)
-    LLM_PROVIDER: str = os.getenv("RAG_LLM_PROVIDER", os.getenv("LLM_PROVIDER", "groq"))
-    LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
-    
-    # Validation: If provider is Groq, ensure model is not a Gemini one
-    if LLM_PROVIDER.lower() == "groq" and "gemini" in LLM_MODEL.lower():
-         LLM_MODEL = "llama-3.3-70b-versatile"
-         
-    LLM_API_KEY: Optional[str] = os.getenv("LLM_API_KEY") or os.getenv("OPENROUTER_API_KEY")
-    GROQ_API_KEY: Optional[str] = os.getenv("GROQ_API_KEY")
-    
-    # Standard Embedding Config
-    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "fastembed")
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-    EMBEDDING_API_KEY: Optional[str] = os.getenv("HF_TOKEN")
-
-    # Rag Processing Options
-    EXTRACTION_MODEL: str = os.getenv("RAG_LLM_MODEL", LLM_MODEL) # Sync with main model
-    GRAPH_DATABASE_URL: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "ignore" # Allow .env variables not defined in this class
-
-settings = RagSettings()
-
-# Configure Rag environment variables
-# These are picked up by Rag's internal configuration
-os.environ["RAG_LLM_PROVIDER"] = settings.LLM_PROVIDER
-os.environ["RAG_LLM_MODEL"] = settings.LLM_MODEL
-os.environ["LLM_PROVIDER"] = settings.LLM_PROVIDER  # Synchronize standard env var
-os.environ["LLM_MODEL"] = settings.LLM_MODEL        # Synchronize standard env var
+class RagSettings:
+    """Mock class to satisfy imports while using central settings"""
+    def __init__(self):
+        self.LLM_PROVIDER = settings.llm.LLM_PROVIDER
+        self.LLM_MODEL = settings.llm.active_model
+        self.LLM_API_KEY = settings.llm.active_api_key
+        self.GROQ_API_KEY = settings.llm.GROQ_API_KEY
+        self.RAG_VECTOR_DB_TYPE = settings.vector_store.VECTOR_STORE_TYPE
+        self.RAG_VECTOR_DB_URL = settings.database.DATABASE_URL # Pass Postgres URL if set
+        
+        # Hardcoded for our verified setup
+        self.EMBEDDING_PROVIDER = "fastembed"
+        self.EMBEDDING_MODEL = settings.vector_store.EMBEDDING_MODEL
+        self.EXTRACTION_MODEL = self.LLM_MODEL
+        self.GRAPH_DATABASE_URL = os.getenv("GRAPH_DATABASE_URL") or settings.database.DATABASE_URL
 
 
-os.environ["RAG_GRAPH_DB_TYPE"] = settings.RAG_GRAPH_DB_TYPE
-os.environ["RAG_GRAPH_URL"] = settings.RAG_GRAPH_URL
-os.environ["RAG_VECTOR_DB_TYPE"] = settings.RAG_VECTOR_DB_TYPE
-os.environ["RAG_VECTOR_DB_URL"] = settings.RAG_VECTOR_DB_URL
-os.environ["RAG_API_KEY"] = settings.RAG_API_KEY or ""
-
-# CRITICAL: Set standard variables for Rag 0.5.x
-os.environ["EMBEDDING_PROVIDER"] = settings.EMBEDDING_PROVIDER
-os.environ["EMBEDDING_MODEL"] = settings.EMBEDDING_MODEL
-os.environ["RAG_EMBEDDING_PROVIDER"] = settings.EMBEDDING_PROVIDER # Alias for safety
-
-# Update API keys if explicitly provided in settings
-if settings.LLM_API_KEY and settings.LLM_API_KEY != "local":
-    os.environ["LLM_API_KEY"] = settings.LLM_API_KEY
-    
-if settings.GROQ_API_KEY:
-    os.environ["GROQ_API_KEY"] = settings.GROQ_API_KEY
+rag_settings = RagSettings()
+# For backwards compatibility with the rest of the code
+import sys
+module = sys.modules[__name__]
+module.settings = rag_settings

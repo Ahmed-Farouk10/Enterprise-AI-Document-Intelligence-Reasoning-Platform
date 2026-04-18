@@ -237,7 +237,7 @@ async def stream_message(
             yield _sse_event("status", f"🔍 Analyzing {len(session.document_ids)} document(s)...")
 
             # Classify intent
-            intent, depth = llm_service.classify_intent(message_data.content)
+            intent, depth = await llm_service.aclassify_intent(message_data.content)
             yield _sse_event("status", f"💡 Got it! Analyzing with {depth} focus...")
 
             # Retrieve context
@@ -253,22 +253,22 @@ async def stream_message(
                 return
 
             yield _sse_event("status", "✨ Great finds! Composing my thoughts...")
+            yield _sse_event("start", "") # Signal that we are starting to generate text
 
-            # Generate with streaming
-            stream_gen = llm_service.generate_with_context(
+            # Stream tokens
+            async for token in llm_service.agenerate_with_context(
                 question=message_data.content,
                 context=context,
                 conversation_history=conversation_history[-6:] if conversation_history else None,
                 intent=intent,
                 num_documents=len(session.document_ids or []),
-                max_context_chars=3000,
+                max_context_chars=12000 if depth == "deep" else 6000,
                 stream=True
-            )
+            ):
 
-            # Stream tokens
-            for token in stream_gen:
                 full_response += token
                 yield _sse_event("token", token)
+
 
             if not full_response:
                 full_response = "Hmm, my brain went blank for a moment! Try asking again and I'll give you a better answer. 😅"
@@ -299,7 +299,16 @@ async def stream_message(
             logger.error("stream_error", error=str(e))
             yield _sse_event("error", f"Oops! Something went wrong: {str(e)}")
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
 
 
 # ==================== HELPER FUNCTIONS ====================
@@ -322,27 +331,63 @@ async def _retrieve_context(
     # Retrieve from vector store
     limit = 15 if depth == "deep" else 8
     all_chunks = []
+    
+    logger.info(f"🔍 Searching context for query: '{query}' across {len(document_ids)} docs: {document_ids}")
 
     for doc_id in document_ids:
+        # 1. Try semantic search first
         chunks = await vector_store_service.search(
             query=query,
             limit=limit,
-            document_id=doc_id
+            document_id=doc_id,
+            threshold=0.01 # Extremely lenient
         )
+        
+        # 2. If semantic search fails, fall back to direct document chunks (Raw retrieval)
+        if not chunks:
+            logger.warning(f"⚠️ Semantic search failed for doc {doc_id[:8]}. Falling back to raw context retrieval.")
+            try:
+                # Direct select chunks by document_id
+                if vector_store_service.store_type == "supabase":
+                    resp = vector_store_service.supabase.table("document_chunks")\
+                        .select("content,metadata")\
+                        .eq("document_id", doc_id)\
+                        .limit(limit)\
+                        .execute()
+                    chunks = [{"text": r["content"], "metadata": r["metadata"]} for r in resp.data]
+            except Exception as e:
+                logger.error(f"Raw retrieval failed: {e}")
+                chunks = []
+
+
+        logger.info(f"📄 Doc {doc_id[:8]}: Found {len(chunks)} chunks total")
         all_chunks.extend(chunks)
+
 
     if not all_chunks:
         return ""
 
+
     # Sort by relevance
     all_chunks.sort(key=lambda x: x.get("distance", 0))
 
-    # Format context with document separators
-    context_texts = []
-    for chunk in all_chunks[:12]:  # Limit chunks for token efficiency
-        context_texts.append(chunk["text"])
+    # Format context with document separators and larger chunk limit
+    docs_context = {}
+    for chunk in all_chunks[:40]: # Increased limit
+        doc_id = chunk.get("document_id", "unknown")
+        if doc_id not in docs_context:
+            docs_context[doc_id] = []
+        docs_context[doc_id].append(chunk["text"])
+    
+    context_parts = []
+    for doc_id, texts in docs_context.items():
+        doc_header = f"--- DOCUMENT START [ID: {doc_id[:8]}] ---"
+        doc_body = "\n".join(texts)
+        doc_footer = f"--- DOCUMENT END [ID: {doc_id[:8]}] ---"
+        context_parts.append(f"{doc_header}\n{doc_body}\n{doc_footer}")
 
-    full_context = "\n---\n".join(context_texts)
+    full_context = "\n\n".join(context_parts)
+
 
     # Cache for multi-document sets
     if len(document_ids) > 1:

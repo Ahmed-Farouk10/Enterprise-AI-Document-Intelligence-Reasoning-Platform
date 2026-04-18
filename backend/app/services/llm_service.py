@@ -7,7 +7,10 @@ import re
 import json
 import logging
 from typing import List, Optional, Dict, Any, Generator
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
+
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -114,50 +117,68 @@ class LLMService:
     """
 
     def __init__(self):
-        self.provider = os.getenv("LLM_PROVIDER", "groq").lower()
+        # Use centralized settings
+        self.provider = settings.llm.LLM_PROVIDER.lower()
         self.token_optimizer = TokenOptimizer()
         self.personality = HumanPersonality()
         
-        # Model configuration
-        model_map = {
-            "openai": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            "groq": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
-            "gemini": os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
-            "ollama": os.getenv("OLLAMA_MODEL", "llama3.1:8b"),
-            "openrouter": os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free"),
-        }
-        self.model_name = model_map.get(self.provider, model_map["groq"])
+        self.model_name = settings.llm.active_model
+        # CRITICAL FAIL-SAFE: Re-check environment variables directly if settings are empty
+        raw_key = settings.llm.active_api_key
+        if not raw_key or raw_key == "dummy-key":
+             raw_key = (
+                 os.getenv("OPENROUTER_API_KEY") or 
+                 os.getenv("GROQ_API_KEY") or
+                 os.getenv("OPENAI_API_KEY") or 
+                 os.getenv("GEMINI_API_KEY") or 
+                 "dummy-key"
+             )
         
-        key_map = {
-            "openai": os.getenv("OPENAI_API_KEY"),
-            "groq": os.getenv("GROQ_API_KEY"),
-            "gemini": os.getenv("GEMINI_API_KEY"),
-            "ollama": "ollama",
-            "openrouter": os.getenv("OPENROUTER_API_KEY"),
-        }
-        self.api_key = key_map.get(self.provider) or "dummy-key"
+        # Strip any hidden whitespace/newlines from characters
+        self.api_key = str(raw_key).strip().strip('"').strip("'")
         
         url_map = {
             "openai": None,
             "groq": "https://api.groq.com/openai/v1",
             "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
-            "ollama": "http://localhost:11434/v1",
+            "ollama": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
             "openrouter": "https://openrouter.ai/api/v1",
         }
         self.base_url = url_map.get(self.provider)
         
+        # Log key availability (obscured)
+        key_status = f"PRESENT (len={len(self.api_key)})" if self.api_key and self.api_key != "dummy-key" else "MISSING"
+        logger.info(f"🚀 Initializing {self.provider} with model {self.model_name}. Key status: {key_status}")
+
         try:
+            # Custom headers for OpenRouter (sometimes improves auth success)
+            extra_headers = {}
+            if self.provider == "openrouter":
+                extra_headers = {
+                    "HTTP-Referer": "https://huggingface.co/spaces",
+                    "X-Title": "DocuCentric AI",
+                }
+
             self.client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
-                timeout=60.0
+                default_headers=extra_headers,
+                timeout=float(settings.llm.TIMEOUT)
+            )
+            self.async_client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                default_headers=extra_headers,
+                timeout=float(settings.llm.TIMEOUT)
             )
             logger.info(f"LLM Service initialized: {self.provider}/{self.model_name}")
+
         except Exception as e:
             logger.error(f"Failed to initialize LLM client: {e}")
             self.client = None
+            self.async_client = None
 
-    def classify_intent(self, question: str) -> tuple[str, str]:
+    async def aclassify_intent(self, question: str) -> tuple[str, str]:
         """Classify query intent and depth in single call (saves tokens)"""
         prompt = f"""Classify this query. Respond with ONLY two words: INTENT DEPTH
 
@@ -167,7 +188,7 @@ DEPTH: shallow|deep
 Query: "{question}"
 Example response: FACTUAL shallow"""
 
-        response = self.generate(prompt=prompt, max_tokens=30, temperature=0.0).strip().upper()
+        response = (await self.agenerate(prompt=prompt, max_tokens=30, temperature=0.0)).strip().upper()
         parts = response.split()
         
         intent = parts[0] if parts and parts[0] in ["SUMMARY", "FACTUAL", "EVALUATIVE", "IMPROVEMENT", "GAP_ANALYSIS", "SCORING", "SEARCH_QUERY", "GENERAL"] else "GENERAL"
@@ -175,14 +196,14 @@ Example response: FACTUAL shallow"""
         
         return intent, depth
 
-    def generate(
+    async def agenerate(
         self,
         prompt: Any,
         max_tokens: int = 1024,
         temperature: float = 0.3,
     ) -> str:
-        """Generate completion with token optimization"""
-        if not self.client:
+        """Generate completion with token optimization asynchronously"""
+        if not self.async_client:
             return "Error: LLM client not configured"
 
         if isinstance(prompt, str):
@@ -191,7 +212,7 @@ Example response: FACTUAL shallow"""
             messages = self.token_optimizer.format_messages_compact(prompt)
 
         try:
-            response = self.client.chat.completions.create(
+            response = await self.async_client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
                 max_tokens=max_tokens,
@@ -202,7 +223,7 @@ Example response: FACTUAL shallow"""
             logger.error(f"Generation failed: {e}")
             return f"Error: {str(e)}"
 
-    def generate_with_context(
+    async def agenerate_with_context(
         self,
         question: str,
         context: str,
@@ -211,21 +232,13 @@ Example response: FACTUAL shallow"""
         num_documents: int = 1,
         max_context_chars: int = 3000,
         stream: bool = False
-    ) -> str | Generator[str, None, None]:
+    ):
         """
-        Generate response with context, personality, and token optimization
-        
-        Args:
-            question: User's question
-            context: Document context (will be compressed)
-            conversation_history: Previous messages
-            intent: Classified intent
-            num_documents: Number of documents being analyzed
-            max_context_chars: Max context length (token optimization)
-            stream: Whether to stream response
+        Generate response with context asynchronously
         """
-        if not self.client:
-            return "I'd love to help, but my brain is taking a coffee break! ☕ Please check if the API key is configured."
+        if not self.async_client:
+            yield "I'd love to help, but my brain is taking a coffee break! ☕ Please check if the API key is configured."
+            return
 
         # Compress context to save tokens
         compressed_context = self.token_optimizer.compress_context(context, max_context_chars)
@@ -236,9 +249,9 @@ Example response: FACTUAL shallow"""
         # Build messages
         messages = [{"role": "system", "content": system_prompt}]
         
-        # Add conversation history (last 3 turns only - token optimization)
+        # Add conversation history
         if conversation_history:
-            for msg in conversation_history[-6:]:  # 3 user + 3 assistant
+            for msg in conversation_history[-6:]:
                 messages.append({"role": msg["role"], "content": msg["content"]})
         
         # Add current question with context
@@ -255,35 +268,48 @@ Please answer based ONLY on the document context provided. If the information is
         # Generate response
         try:
             if stream:
-                return self._generate_stream(messages, max_tokens=2048, temperature=0.2)
+                async for chunk in self._agenerate_stream(messages, max_tokens=2048, temperature=0.2):
+                    yield chunk
             else:
-                response = self.client.chat.completions.create(
+                response = await self.async_client.chat.completions.create(
                     model=self.model_name,
                     messages=messages,
                     max_tokens=2048,
                     temperature=0.2,
                 )
-                return response.choices[0].message.content.strip()
+                yield response.choices[0].message.content.strip()
         except Exception as e:
-            logger.error(f"Generation with context failed: {e}")
-            return f"Oops! Something went wrong while I was analyzing the documents: {str(e)}"
+            logger.error(f"Generation failed: {e}")
+            yield f"Error: {str(e)}"
 
-    def _generate_stream(self, messages: List[Dict], max_tokens: int = 2048, temperature: float = 0.2) -> Generator[str, None, None]:
-        """Stream generation"""
+    async def _agenerate_stream(self, messages: List[Dict], max_tokens: int = 2048, temperature: float = 0.2):
+        """Stream generation asynchronously"""
         try:
-            response = self.client.chat.completions.create(
+            response = await self.async_client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stream=True
             )
-            for chunk in response:
+            async for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
         except Exception as e:
             logger.error(f"Streaming failed: {e}")
             yield f"Error: {str(e)}"
+
+    # Backward compatibility
+    def generate(self, *args, **kwargs):
+        import asyncio
+        return asyncio.run(self.agenerate(*args, **kwargs))
+
+    def classify_intent(self, *args, **kwargs):
+        import asyncio
+        return asyncio.run(self.aclassify_intent(*args, **kwargs))
+
+    def generate_with_context(self, *args, **kwargs):
+        return self.agenerate_with_context(*args, **kwargs)
 
     def warmup(self) -> None:
         """Verify API connection"""

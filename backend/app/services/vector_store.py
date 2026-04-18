@@ -56,9 +56,9 @@ class VectorStoreService:
 
     def _init_supabase(self):
         from supabase import create_client, Client
-        url = settings.database.SUPABASE_URL
-        key = settings.database.SUPABASE_SERVICE_ROLE_KEY
-        if not url or not key:
+        url = (settings.database.SUPABASE_URL or "").strip().rstrip('/')
+        key = (settings.database.SUPABASE_SERVICE_ROLE_KEY or "").strip()
+        if not url or not key or "your-project" in url:
             raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set for supabase vector store")
         self.supabase: Client = create_client(url, key)
         logger.info("Initialized Supabase Vector Store (pgvector)")
@@ -125,7 +125,14 @@ class VectorStoreService:
         logger.info(f"✅ Indexed {len(chunks)} chunks for document {document_id}")
         return len(chunks)
 
-    async def search(self, query: str, limit: int = 5, document_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def search(
+        self, 
+        query: str, 
+        limit: int = 5, 
+        document_id: Optional[str] = None,
+        document_ids: Optional[List[str]] = None,
+        threshold: float = 0.1
+    ) -> List[Dict[str, Any]]:
         query_vector = await self.embedding_engine.embed_text(query)
         processed_results = []
 
@@ -133,15 +140,25 @@ class VectorStoreService:
             # Using Supabase RPC for vector search (match_documents)
             params = {
                 "query_embedding": query_vector,
-                "match_threshold": 0.5,
+                "match_threshold": threshold,
                 "match_count": limit,
             }
+            
+            # The match_documents RPC usually takes filter_document_id as a single string
+            # We will handle multiple IDs by calling it multiple times or updating the RPC if possible
+            # For now, let's stick to the current RPC signature but use the lower threshold
             if document_id:
                 params["filter_document_id"] = document_id
             
             try:
+                # DIAGNOSTIC: Check if any data exists at all
+                check = self.supabase.table(self.table_name).select("id", count="exact").limit(1).execute()
+                logger.info(f"📊 Vector Store Diagnostic: Table '{self.table_name}' has {check.count} total records")
+
                 # Call the 'match_documents' SQL function
                 response = self.supabase.rpc("match_documents", params).execute()
+
+
                 for r in response.data:
                     processed_results.append({
                         "id": r.get("id"),
